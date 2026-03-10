@@ -7,6 +7,7 @@ description = "A next-generation PipeWire graph and control application"
 license = "MIT OR Apache-2.0"
 authors = ["trusch"]
 repository = "https://github.com/trusch/pipeflow"
+homepage = "https://github.com/trusch/pipeflow"
 keywords = ["pipewire", "audio", "graph", "control"]
 categories = ["multimedia::audio", "gui"]
 

@@ -66,6 +66,14 @@ Requires Rust 1.88+ (stable). The `network` feature (gRPC remote control) is ena
 cargo install --path . --no-default-features
 ```
 
+### Desktop Entry
+
+To add Pipeflow to your application launcher:
+
+```bash
+sudo cp assets/pipeflow.desktop /usr/share/applications/
+```
+
 ## Usage
 
 ### Quick Start

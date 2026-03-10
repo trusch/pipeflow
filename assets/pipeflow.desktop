@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Pipeflow
+Comment=PipeWire graph and control application
+Exec=pipeflow
+Icon=pipeflow
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Mixer;
+Keywords=pipewire;audio;routing;graph;mixer;
+StartupWMClass=pipeflow
