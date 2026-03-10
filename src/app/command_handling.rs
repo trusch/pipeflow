@@ -233,6 +233,12 @@ impl PipeflowApp {
                     "toggle_settings" => {
                         self.components.show_settings = !self.components.show_settings;
                     }
+                    "toggle_left_sidebar" => {
+                        self.components.left_sidebar.toggle();
+                    }
+                    "toggle_right_sidebar" => {
+                        self.components.right_sidebar.toggle();
+                    }
                     _ => {
                         tracing::warn!("Unknown custom command: {}", name);
                     }

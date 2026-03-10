@@ -291,6 +291,21 @@ impl CommandRegistry {
             action: CommandAction::Custom("toggle_settings".to_string()),
         });
 
+        // Sidebar commands
+        self.register(CommandEntry {
+            name: "Toggle Left Sidebar".to_string(),
+            description: "Show or hide the left sidebar (filters, groups, help)".to_string(),
+            shortcut: Some("[".to_string()),
+            action: CommandAction::Custom("toggle_left_sidebar".to_string()),
+        });
+
+        self.register(CommandEntry {
+            name: "Toggle Right Sidebar".to_string(),
+            description: "Show or hide the right sidebar (inspector)".to_string(),
+            shortcut: Some("]".to_string()),
+            action: CommandAction::Custom("toggle_right_sidebar".to_string()),
+        });
+
         // Group commands
         self.register(CommandEntry {
             name: "Create Group".to_string(),
