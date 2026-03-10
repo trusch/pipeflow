@@ -207,6 +207,24 @@ impl CommandRegistry {
             )),
         });
 
+        self.register(CommandEntry {
+            name: "Set Normal Mode".to_string(),
+            description: "Switch to normal mode (all actions allowed)".to_string(),
+            shortcut: None,
+            action: CommandAction::Ui(UiCommand::SetSafetyMode(
+                crate::domain::safety::SafetyMode::Normal,
+            )),
+        });
+
+        self.register(CommandEntry {
+            name: "Set Stage Mode".to_string(),
+            description: "Switch to stage mode (safe for live use)".to_string(),
+            shortcut: None,
+            action: CommandAction::Ui(UiCommand::SetSafetyMode(
+                crate::domain::safety::SafetyMode::Stage,
+            )),
+        });
+
         // Selection commands
         self.register(CommandEntry {
             name: "Clear Selection".to_string(),
@@ -235,6 +253,42 @@ impl CommandRegistry {
             description: "Reset zoom and pan".to_string(),
             shortcut: Some("Ctrl+0".to_string()),
             action: CommandAction::Custom("reset_view".to_string()),
+        });
+
+        self.register(CommandEntry {
+            name: "Increase Spacing".to_string(),
+            description: "Increase grid spacing".to_string(),
+            shortcut: None,
+            action: CommandAction::Custom("increase_spacing".to_string()),
+        });
+
+        self.register(CommandEntry {
+            name: "Decrease Spacing".to_string(),
+            description: "Decrease grid spacing".to_string(),
+            shortcut: None,
+            action: CommandAction::Custom("decrease_spacing".to_string()),
+        });
+
+        // UI panel toggles
+        self.register(CommandEntry {
+            name: "Toggle Help Panel".to_string(),
+            description: "Show or hide the help panel".to_string(),
+            shortcut: Some("H".to_string()),
+            action: CommandAction::Custom("toggle_help".to_string()),
+        });
+
+        self.register(CommandEntry {
+            name: "Toggle Inspector Panel".to_string(),
+            description: "Show or hide the inspector panel".to_string(),
+            shortcut: Some("I".to_string()),
+            action: CommandAction::Custom("toggle_inspector".to_string()),
+        });
+
+        self.register(CommandEntry {
+            name: "Toggle Settings".to_string(),
+            description: "Show or hide the settings panel".to_string(),
+            shortcut: Some(",".to_string()),
+            action: CommandAction::Custom("toggle_settings".to_string()),
         });
 
         // Group commands

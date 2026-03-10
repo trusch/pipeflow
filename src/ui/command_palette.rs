@@ -163,6 +163,11 @@ impl CommandPalette {
                                 Self::draw_command_entry(ui, rect, entry, is_selected);
                             }
 
+                            // Scroll to keep selected item visible
+                            if is_selected {
+                                response.scroll_to_me(Some(egui::Align::Center));
+                            }
+
                             if response.clicked() {
                                 result = Some(entry.action.clone());
                                 self.record_usage(&entry.name);

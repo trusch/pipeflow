@@ -216,6 +216,23 @@ impl PipeflowApp {
                     "reset_view" => {
                         self.components.graph_view.reset_view();
                     }
+                    "increase_spacing" => {
+                        self.config.ui.grid_spacing =
+                            (self.config.ui.grid_spacing + 5.0).min(50.0);
+                    }
+                    "decrease_spacing" => {
+                        self.config.ui.grid_spacing =
+                            (self.config.ui.grid_spacing - 5.0).max(10.0);
+                    }
+                    "toggle_help" => {
+                        self.components.show_help = !self.components.show_help;
+                    }
+                    "toggle_inspector" => {
+                        self.components.show_inspector = !self.components.show_inspector;
+                    }
+                    "toggle_settings" => {
+                        self.components.show_settings = !self.components.show_settings;
+                    }
                     _ => {
                         tracing::warn!("Unknown custom command: {}", name);
                     }
