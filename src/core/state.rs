@@ -429,12 +429,12 @@ impl PositionAnimation {
     }
 
     /// Fast animation for short-lived nodes (like notification sounds).
-    pub fn fast(from: Position, to: Position) -> Self {
+    pub(crate) fn fast(from: Position, to: Position) -> Self {
         Self::new(from, to, 8.0) // Complete in ~125ms
     }
 
     /// Normal animation speed.
-    pub fn normal(from: Position, to: Position) -> Self {
+    pub(crate) fn normal(from: Position, to: Position) -> Self {
         Self::new(from, to, 5.0) // Complete in ~200ms
     }
 
