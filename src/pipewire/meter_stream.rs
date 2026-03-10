@@ -39,8 +39,8 @@ impl Default for MeterStreamData {
     fn default() -> Self {
         Self {
             node_id: 0,
-            channels: 2,
-            sample_rate: 48000,
+            channels: 2,       // Default stereo; updated when stream format is negotiated
+            sample_rate: 48000, // Common default; updated from actual stream format
             peaks: vec![0.0; 2],
             rms: vec![0.0; 2],
             dirty: false,
@@ -53,8 +53,8 @@ impl MeterStreamData {
     fn new(node_id: NodeId) -> Self {
         Self {
             node_id: node_id.raw(),
-            channels: 2,
-            sample_rate: 48000,
+            channels: 2,       // Default stereo; updated when stream format is negotiated
+            sample_rate: 48000, // Common default; updated from actual stream format
             peaks: vec![0.0; 2],
             rms: vec![0.0; 2],
             dirty: false,
@@ -90,10 +90,16 @@ impl MeterStreamData {
     fn take_update(&mut self) -> Option<MeterUpdate> {
         if self.dirty {
             self.dirty = false;
+            // Swap out current buffers with fresh zeroed ones to avoid cloning.
+            // The old buffers become the update payload; new buffers are reused next cycle.
+            let mut peak = vec![0.0; self.channels as usize];
+            let mut rms = vec![0.0; self.channels as usize];
+            std::mem::swap(&mut self.peaks, &mut peak);
+            std::mem::swap(&mut self.rms, &mut rms);
             Some(MeterUpdate {
                 node_id: NodeId::new(self.node_id),
-                peak: self.peaks.clone(),
-                rms: self.rms.clone(),
+                peak,
+                rms,
             })
         } else {
             None

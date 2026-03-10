@@ -116,6 +116,10 @@ impl PwConnection {
     }
 
     /// Stops the connection.
+    ///
+    /// Signals the PipeWire thread to exit and waits up to 2 seconds for it
+    /// to finish. If the thread doesn't exit in time (e.g., blocked in PipeWire),
+    /// it is detached to avoid deadlocking the main thread during shutdown.
     pub fn stop(&mut self) {
         self.running
             .store(false, std::sync::atomic::Ordering::SeqCst);
@@ -124,7 +128,17 @@ impl PwConnection {
         let _ = self.command_tx.send(AppCommand::Disconnect);
 
         if let Some(handle) = self.thread_handle.take() {
-            let _ = handle.join();
+            // Use a timeout to avoid deadlocking if the PW thread is stuck.
+            // Spawn a helper thread that performs the blocking join, then wait
+            // on its result with a timeout via a channel.
+            let (done_tx, done_rx) = bounded::<()>(1);
+            std::thread::spawn(move || {
+                let _ = handle.join();
+                let _ = done_tx.send(());
+            });
+            if done_rx.recv_timeout(std::time::Duration::from_secs(2)).is_err() {
+                tracing::warn!("PipeWire thread did not exit within 2s, detaching");
+            }
         }
     }
 
@@ -380,8 +394,9 @@ fn try_connect_and_run(
     let mut stale_check_counter = 0u32;
     let stale_threshold = std::time::Duration::from_secs(5);
     while running.load(std::sync::atomic::Ordering::SeqCst) {
-        // Process one iteration of the main loop (non-blocking)
-        loop_.iterate(std::time::Duration::from_millis(16)); // ~60 Hz
+        // Process one iteration of the main loop.
+        // 16ms ≈ 60 Hz, matching the UI frame rate for responsive event processing.
+        loop_.iterate(std::time::Duration::from_millis(16));
 
         // Check for commands
         while let Ok(command) = command_rx.try_recv() {
@@ -569,10 +584,10 @@ fn parse_props_pod(pod: &Pod, node_id: NodeId, event_tx: &Sender<PwEvent>) {
             vol_control.master = v;
         }
         if let Some(ch) = channel_volumes {
-            // Use channel volumes as master (average or first channel)
+            // Derive master volume as the mean of per-channel volumes.
+            // This gives a single representative level for the UI master slider.
             if !ch.is_empty() {
-                // Use .max(1) as defensive guard against empty slice (should never happen due to check above)
-                vol_control.master = ch.iter().sum::<f32>() / ch.len().max(1) as f32;
+                vol_control.master = ch.iter().sum::<f32>() / ch.len() as f32;
                 vol_control.channels = ch;
             }
         }

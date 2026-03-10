@@ -888,7 +888,6 @@ mod tests {
         assert!(ConnectionState::Connected.is_connected());
         assert!(!ConnectionState::Error.is_connected());
     }
-}
 
     #[test]
     fn test_persistent_positions_serialization() {
@@ -905,15 +904,233 @@ mod tests {
             Position::new(100.0, 200.0),
         );
 
-        // Try to serialize
-        let result = serde_json::to_string_pretty(&ui_state);
-        match result {
-            Ok(json) => {
-                println!("Serialized JSON:\n{}", json);
-                // Try to deserialize back
-                let deserialized: UiState = serde_json::from_str(&json).unwrap();
-                assert_eq!(deserialized.persistent_positions.len(), 1);
-            }
-            Err(e) => panic!("Serialization failed: {}", e),
-        }
+        let json = serde_json::to_string_pretty(&ui_state)
+            .expect("UiState serialization should not fail");
+        let deserialized: UiState = serde_json::from_str(&json)
+            .expect("UiState deserialization should not fail");
+        assert_eq!(deserialized.persistent_positions.len(), 1);
     }
+
+    /// Integration test: simulates a full node lifecycle (add, configure, remove).
+    #[test]
+    fn test_node_lifecycle_with_ports_and_links() {
+        let mut app_state = AppState::default();
+        let graph = &mut app_state.graph;
+
+        // Add two nodes with ports
+        let mut src = Node::new(NodeId::new(1), "Firefox".to_string());
+        src.media_class = Some(crate::domain::graph::MediaClass::StreamOutputAudio);
+        src.application_name = Some("Firefox".to_string());
+        graph.add_node(src);
+
+        let mut sink = Node::new(NodeId::new(2), "Speakers".to_string());
+        sink.media_class = Some(crate::domain::graph::MediaClass::AudioSink);
+        graph.add_node(sink);
+
+        // Add ports
+        graph.add_port(Port::new(PortId::new(10), NodeId::new(1), "output_FL".to_string(), PortDirection::Output));
+        graph.add_port(Port::new(PortId::new(11), NodeId::new(1), "output_FR".to_string(), PortDirection::Output));
+        graph.add_port(Port::new(PortId::new(20), NodeId::new(2), "input_FL".to_string(), PortDirection::Input));
+        graph.add_port(Port::new(PortId::new(21), NodeId::new(2), "input_FR".to_string(), PortDirection::Input));
+
+        // Verify port assignment to nodes
+        assert_eq!(graph.get_node(&NodeId::new(1)).unwrap().port_ids.len(), 2);
+        assert_eq!(graph.get_node(&NodeId::new(2)).unwrap().port_ids.len(), 2);
+
+        // Create links
+        graph.add_link(Link::new(LinkId::new(100), PortId::new(10), PortId::new(20), NodeId::new(1), NodeId::new(2)));
+        graph.add_link(Link::new(LinkId::new(101), PortId::new(11), PortId::new(21), NodeId::new(1), NodeId::new(2)));
+        assert_eq!(graph.links.len(), 2);
+        assert_eq!(graph.links_for_node(&NodeId::new(1)).len(), 2);
+
+        // Remove source node - should cascade delete ports and links
+        graph.remove_node(&NodeId::new(1));
+        assert!(graph.get_node(&NodeId::new(1)).is_none());
+        assert_eq!(graph.links.len(), 0, "Links should be removed when node is removed");
+        assert!(graph.get_port(&PortId::new(10)).is_none(), "Ports should be removed when node is removed");
+
+        // Sink node should still exist with its ports
+        assert!(graph.get_node(&NodeId::new(2)).is_some());
+        assert_eq!(graph.get_node(&NodeId::new(2)).unwrap().port_ids.len(), 2);
+    }
+
+    /// Integration test: simulates UI state persistence across "restarts".
+    #[test]
+    fn test_persistent_state_restoration() {
+        use crate::util::spatial::Position;
+
+        let mut ui = UiState::default();
+        let identifier = NodeIdentifier::new(
+            "SuperCollider".to_string(),
+            Some("scide".to_string()),
+            Some("Audio Output".to_string()),
+        );
+
+        // Simulate first session: user positions a node and marks it uninteresting
+        let node_id = NodeId::new(42);
+        ui.update_position(node_id, &identifier, Position::new(300.0, 400.0));
+        ui.update_uninteresting(node_id, &identifier, true);
+        ui.set_custom_name(node_id, &identifier, "My SuperCollider".to_string());
+
+        // Simulate restart: runtime state is cleared
+        ui.node_positions.clear();
+        ui.uninteresting_nodes.clear();
+        ui.custom_names.clear();
+
+        // New node appears with different ID but same identifier
+        let new_node_id = NodeId::new(99);
+        let restored_pos = ui.restore_position_for_node(new_node_id, &identifier);
+        let restored_uninteresting = ui.restore_uninteresting_for_node(new_node_id, &identifier);
+        let restored_name = ui.restore_custom_name_for_node(new_node_id, &identifier);
+
+        assert!(restored_pos, "Position should be restored from persistent state");
+        assert!(restored_uninteresting, "Uninteresting status should be restored");
+        assert!(restored_name, "Custom name should be restored");
+
+        assert_eq!(ui.get_node_position(&new_node_id), Position::new(300.0, 400.0));
+        assert!(ui.is_uninteresting(&new_node_id));
+        assert_eq!(ui.get_custom_name(&new_node_id), Some("My SuperCollider"));
+    }
+
+    /// Integration test: volume state persistence.
+    #[test]
+    fn test_volume_persistence() {
+        use crate::domain::audio::VolumeControl;
+
+        let mut ui = UiState::default();
+        let identifier = NodeIdentifier::new(
+            "Firefox".to_string(),
+            Some("Firefox".to_string()),
+            Some("Audio Output".to_string()),
+        );
+
+        // Set volume and persist it
+        let vol = VolumeControl {
+            master: 0.75,
+            muted: true,
+            channels: vec![0.7, 0.8],
+            step: 0.01,
+        };
+        ui.persist_volume(&identifier, vol.clone());
+
+        // Restore for a new node
+        let restored = ui.restore_volume_for_node(&identifier);
+        assert!(restored.is_some());
+        let restored = restored.unwrap();
+        assert_eq!(restored.master, 0.75);
+        assert!(restored.muted);
+        assert_eq!(restored.channels, vec![0.7, 0.8]);
+    }
+
+    /// Test: node cleanup preserves persistent state.
+    #[test]
+    fn test_cleanup_preserves_persistent_state() {
+        use crate::util::spatial::Position;
+
+        let mut ui = UiState::default();
+        let node_id = NodeId::new(1);
+        let identifier = NodeIdentifier::new(
+            "node".to_string(),
+            None,
+            None,
+        );
+
+        // Set up both runtime and persistent state
+        ui.update_position(node_id, &identifier, Position::new(100.0, 200.0));
+        ui.update_uninteresting(node_id, &identifier, true);
+        ui.set_custom_name(node_id, &identifier, "custom".to_string());
+
+        // Cleanup removes runtime state only
+        ui.cleanup_removed_node(&node_id);
+
+        // Runtime state gone
+        assert!(!ui.node_positions.contains_key(&node_id));
+        assert!(!ui.uninteresting_nodes.contains(&node_id));
+        assert!(!ui.custom_names.contains_key(&node_id));
+
+        // Persistent state preserved
+        assert!(ui.persistent_positions.contains_key(&identifier));
+        assert!(ui.persistent_uninteresting.contains(&identifier));
+        assert!(ui.persistent_custom_names.contains_key(&identifier));
+    }
+
+    /// Test: animation lifecycle.
+    #[test]
+    fn test_animation_lifecycle() {
+        use crate::util::spatial::Position;
+
+        let mut ui = UiState::default();
+        let node_id = NodeId::new(1);
+
+        // Set an initial position so the animation has a start point
+        ui.set_node_position(node_id, Position::new(10.0, 10.0));
+
+        // Start animation to a distant target
+        ui.animate_to_position(node_id, Position::new(500.0, 300.0), false);
+        assert!(!ui.position_animations.is_empty());
+
+        // Run enough frames to complete (~200ms at 60fps = 12 frames)
+        for _ in 0..20 {
+            ui.update_animations(1.0 / 60.0);
+        }
+
+        // Animation should be complete
+        assert!(ui.position_animations.is_empty());
+        let final_pos = ui.get_node_position(&node_id);
+        assert!((final_pos.x - 500.0).abs() < 1.0);
+        assert!((final_pos.y - 300.0).abs() < 1.0);
+    }
+
+    /// Test: layer visibility filtering.
+    #[test]
+    fn test_layer_visibility() {
+        use crate::domain::graph::NodeLayer;
+
+        let mut vis = LayerVisibility::default();
+        assert!(vis.is_visible(NodeLayer::Hardware));
+        assert!(vis.is_visible(NodeLayer::Pipewire));
+        assert!(vis.is_visible(NodeLayer::Session));
+
+        vis.toggle(NodeLayer::Pipewire);
+        assert!(!vis.is_visible(NodeLayer::Pipewire));
+        assert!(vis.is_visible(NodeLayer::Hardware));
+
+        vis.toggle(NodeLayer::Pipewire);
+        assert!(vis.is_visible(NodeLayer::Pipewire));
+    }
+
+    /// Test: GraphState port removal cascades to links.
+    #[test]
+    fn test_port_removal_cascades_to_links() {
+        let mut graph = GraphState::default();
+
+        graph.add_node(Node::new(NodeId::new(1), "Node1".to_string()));
+        graph.add_node(Node::new(NodeId::new(2), "Node2".to_string()));
+        graph.add_port(Port::new(PortId::new(10), NodeId::new(1), "out".to_string(), PortDirection::Output));
+        graph.add_port(Port::new(PortId::new(20), NodeId::new(2), "in".to_string(), PortDirection::Input));
+        graph.add_link(Link::new(LinkId::new(100), PortId::new(10), PortId::new(20), NodeId::new(1), NodeId::new(2)));
+
+        assert_eq!(graph.links.len(), 1);
+        graph.remove_port(&PortId::new(10));
+        assert_eq!(graph.links.len(), 0, "Link should be removed when port is removed");
+        // Link meters should also be cleaned up
+        assert!(!graph.link_meters.contains_key(&LinkId::new(100)));
+    }
+
+    /// Test: graph clear resets everything.
+    #[test]
+    fn test_graph_clear() {
+        let mut graph = GraphState::default();
+        graph.add_node(Node::new(NodeId::new(1), "N".to_string()));
+        graph.add_port(Port::new(PortId::new(10), NodeId::new(1), "p".to_string(), PortDirection::Output));
+
+        assert!(!graph.nodes.is_empty());
+        graph.clear();
+
+        assert!(graph.nodes.is_empty());
+        assert!(graph.ports.is_empty());
+        assert!(graph.links.is_empty());
+        assert!(graph.meters.is_empty());
+        assert!(graph.volumes.is_empty());
+    }
+}

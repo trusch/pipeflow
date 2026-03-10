@@ -98,6 +98,11 @@ impl SidebarState {
         true
     }
 
+    /// Returns true if the sidebar is currently animating.
+    pub fn is_animating(&self) -> bool {
+        self.animating
+    }
+
     /// Returns true if content should be shown in collapsed mode.
     pub fn show_collapsed_content(&self) -> bool {
         self.collapsed || self.current_width < MIN_WIDTH - 20.0

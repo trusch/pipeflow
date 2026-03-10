@@ -33,15 +33,15 @@ pub struct UiConfig {
     pub default_zoom: f32,
     /// Show grid in graph view
     pub show_grid: bool,
-    /// Grid spacing in pixels
+    /// Grid spacing in UI pixels
     pub grid_spacing: f32,
     /// Snap nodes to grid
     pub snap_to_grid: bool,
     /// Show mini-map
     pub show_minimap: bool,
-    /// Node width
+    /// Node width in UI pixels
     pub node_width: f32,
-    /// Port spacing
+    /// Vertical spacing between ports in UI pixels
     pub port_spacing: f32,
 }
 

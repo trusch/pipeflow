@@ -80,6 +80,7 @@ impl SettingsPanel {
             ui.label("Refresh rate (Hz):");
             let mut rate = config.meters.refresh_rate as f32;
             if ui
+                // 10-60 Hz: below 10 is too sluggish for meters; above 60 exceeds frame rate
                 .add(egui::Slider::new(&mut rate, 10.0..=60.0).integer())
                 .changed()
             {
@@ -101,6 +102,7 @@ impl SettingsPanel {
             ui.label("Peak hold decay (ms):");
             let mut decay = config.meters.peak_hold_decay_ms as f32;
             if ui
+                // 500-5000ms: below 500ms is too fast to read; above 5s is sluggish
                 .add(egui::Slider::new(&mut decay, 500.0..=5000.0).integer())
                 .changed()
             {

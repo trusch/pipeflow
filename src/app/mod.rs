@@ -28,7 +28,7 @@ use crate::ui::help::show_help;
 use crate::ui::node_panel::NodePanel;
 use crate::ui::rules::RulesPanel;
 use crate::ui::settings::SettingsPanel;
-use crate::ui::sidebar::{SidebarState, COLLAPSED_WIDTH, MAX_WIDTH, MIN_WIDTH};
+use crate::ui::sidebar::{SidebarState, MAX_WIDTH, MIN_WIDTH};
 use crate::ui::theme::Theme;
 use crate::ui::toolbar::Toolbar;
 use crate::util::id::{NodeId, NodeIdentifier};
@@ -134,6 +134,10 @@ pub(crate) struct AppComponents {
     /// Rename node dialog state
     pub rename_dialog: RenameNodeDialog,
 
+    // --- Status ---
+    /// Transient status message: (message, timestamp, is_error)
+    pub status_message: Option<(String, std::time::Instant, bool)>,
+
     // --- Timing ---
     /// Last layout save timestamp (for throttling)
     pub last_layout_save: std::time::Instant,
@@ -168,6 +172,7 @@ impl AppComponents {
             show_settings: false,
             needs_layout_save: false,
             rename_dialog: RenameNodeDialog::default(),
+            status_message: None,
             last_layout_save: std::time::Instant::now(),
             last_viewport_size: (1000.0, 800.0),
             left_sidebar: SidebarState::default(),
@@ -206,6 +211,7 @@ impl eframe::App for PipeflowApp {
         // --- UI Rendering ---
         self.render_floating_windows(ctx);
         self.render_toolbar(ctx);
+        self.render_status_bar(ctx);
         self.render_inspector_panel(ctx);
         self.render_left_panel(ctx);
         self.render_graph_view(ctx);
@@ -213,8 +219,20 @@ impl eframe::App for PipeflowApp {
         // --- Persistence ---
         self.handle_layout_save();
 
-        // Request continuous repaint
-        ctx.request_repaint();
+        // Only request continuous repaint when meters are active or animations are running.
+        // This avoids 100% CPU usage when the app is idle.
+        let has_animations = !self.state.read().ui.position_animations.is_empty();
+        let meters_active = self.config.meters.enabled;
+        let sidebars_animating = self.components.left_sidebar.is_animating()
+            || self.components.right_sidebar.is_animating();
+
+        if meters_active || has_animations || sidebars_animating {
+            // Repaint at ~60 Hz when active
+            ctx.request_repaint();
+        } else {
+            // When idle, repaint at ~4 Hz to catch external PipeWire events
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -290,9 +308,20 @@ impl PipeflowApp {
                         let response = SettingsPanel::show(ui, &mut self.config);
                         if response.save_requested {
                             if let Err(e) = self.config.save() {
-                                tracing::error!("Failed to save config: {}", e);
+                                let msg = format!("Failed to save config: {}", e);
+                                tracing::error!("{}", msg);
+                                self.components.status_message = Some((
+                                    msg,
+                                    std::time::Instant::now(),
+                                    true,
+                                ));
                             } else {
                                 tracing::info!("Configuration saved");
+                                self.components.status_message = Some((
+                                    "Settings saved".to_string(),
+                                    std::time::Instant::now(),
+                                    false,
+                                ));
                             }
                         }
                     });
@@ -366,6 +395,30 @@ impl PipeflowApp {
             self.components.rename_dialog.close();
         } else if should_close {
             self.components.rename_dialog.close();
+        }
+    }
+
+    /// Renders a transient status bar at the bottom for user notifications.
+    /// Messages auto-clear after 5 seconds.
+    fn render_status_bar(&mut self, ctx: &egui::Context) {
+        const STATUS_DURATION: std::time::Duration = std::time::Duration::from_secs(5);
+
+        // Auto-clear expired messages
+        if let Some((_, created, _)) = &self.components.status_message {
+            if created.elapsed() >= STATUS_DURATION {
+                self.components.status_message = None;
+            }
+        }
+
+        if let Some((msg, _, is_error)) = &self.components.status_message {
+            egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+                let color = if *is_error {
+                    egui::Color32::from_rgb(255, 100, 100)
+                } else {
+                    ui.visuals().text_color()
+                };
+                ui.colored_label(color, msg);
+            });
         }
     }
 
@@ -1015,11 +1068,13 @@ impl PipeflowApp {
         // Rename node
         if let Some(node_id) = response.rename_node {
             let state = self.state.read();
-            let current_name = state.ui.resolved_display_name(
-                state.graph.get_node(&node_id).unwrap_or_else(|| panic!("Node not found"))
-            ).to_string();
-            drop(state);
-            self.components.rename_dialog.open(node_id, &current_name);
+            if let Some(node) = state.graph.get_node(&node_id) {
+                let current_name = state.ui.resolved_display_name(node).to_string();
+                drop(state);
+                self.components.rename_dialog.open(node_id, &current_name);
+            } else {
+                tracing::warn!("Cannot rename node {:?}: node no longer exists", node_id);
+            }
         }
     }
 
@@ -1062,11 +1117,13 @@ impl PipeflowApp {
     }
 
     /// Saves the current layout to disk.
-    fn save_layout(&self) {
+    fn save_layout(&mut self) {
         if let Ok(manager) = crate::core::config::LayoutManager::new() {
             let state = self.state.read();
             if let Err(e) = manager.save(&state.ui) {
-                tracing::error!("Failed to save layout: {}", e);
+                let msg = format!("Failed to save layout: {}", e);
+                tracing::error!("{}", msg);
+                self.components.status_message = Some((msg, std::time::Instant::now(), true));
             }
         }
     }
