@@ -473,6 +473,19 @@ impl PipeflowApp {
     /// Renders the inspector panel (right side).
     fn render_inspector_panel(&mut self, ctx: &egui::Context) {
         if !self.components.show_inspector {
+            // Show a thin strip so the user can re-open the inspector
+            egui::SidePanel::right("inspector_collapsed_strip")
+                .exact_width(24.0)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.add_space(8.0);
+                    ui.vertical_centered(|ui| {
+                        if ui.button("◀").on_hover_text("Show Inspector (I)").clicked() {
+                            self.components.show_inspector = true;
+                            self.components.right_sidebar.expand();
+                        }
+                    });
+                });
             return;
         }
 
@@ -642,6 +655,13 @@ impl PipeflowApp {
             } else {
                 state.ui.selected_nodes.clear();
                 state.ui.selected_nodes.insert(node_id);
+            }
+            drop(state);
+
+            // Auto-show and expand the inspector when selecting a node
+            self.components.show_inspector = true;
+            if self.components.right_sidebar.collapsed {
+                self.components.right_sidebar.expand();
             }
         }
     }
