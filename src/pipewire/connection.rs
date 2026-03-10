@@ -999,7 +999,8 @@ fn handle_command(
             let _ = event_tx.send(PwEvent::VolumeChanged(node_id, vol_control));
         }
         AppCommand::Disconnect => {
-            tracing::info!("Disconnect requested");
+            tracing::info!("Disconnect requested, stopping all meter streams");
+            meter_manager.stop_all();
         }
         AppCommand::StartAllMeters => {
             tracing::info!("Starting meters for all registered nodes");
