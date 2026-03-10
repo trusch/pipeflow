@@ -621,6 +621,7 @@ impl UiState {
     }
 
     /// Returns the custom display name for a node, if set.
+    #[cfg(test)]
     pub fn get_custom_name(&self, id: &NodeId) -> Option<&str> {
         self.custom_names.get(id).map(|s| s.as_str())
     }

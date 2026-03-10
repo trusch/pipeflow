@@ -160,9 +160,11 @@ mod tests {
 
     #[test]
     fn test_sidebar_state_collapse_preserves_width() {
-        let mut state = SidebarState::default();
-        state.current_width = 300.0;
-        state.target_width = 300.0;
+        let mut state = SidebarState {
+            current_width: 300.0,
+            target_width: 300.0,
+            ..SidebarState::default()
+        };
 
         state.collapse();
         assert!(state.collapsed);

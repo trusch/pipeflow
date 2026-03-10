@@ -56,10 +56,7 @@ impl RenameNodeDialog {
         self.input.clear();
     }
 
-    /// Returns true if the dialog is open.
-    pub fn is_open(&self) -> bool {
-        self.node_id.is_some()
-    }
+
 }
 
 /// Main application struct.

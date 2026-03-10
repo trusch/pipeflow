@@ -43,7 +43,7 @@ impl RuleTrigger {
 }
 
 /// A glob-style pattern for matching node/port identifiers.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MatchPattern {
     /// Pattern for app_name (e.g., "*DAW*", "Firefox", "")
     /// Empty string means "any"
@@ -56,6 +56,7 @@ pub struct MatchPattern {
 
 impl MatchPattern {
     /// Creates a new match pattern.
+    #[cfg(test)]
     pub fn new(
         app_name: impl Into<String>,
         node_name: impl Into<String>,
@@ -93,26 +94,8 @@ impl MatchPattern {
         glob_match::glob_match(pattern, text)
     }
 
-    /// Returns a human-readable description of this pattern.
-    pub fn display(&self) -> String {
-        let app = if self.app_name.is_empty() {
-            "*".to_string()
-        } else {
-            self.app_name.clone()
-        };
-        format!("{}:{}", app, self.port_name)
-    }
 }
 
-impl Default for MatchPattern {
-    fn default() -> Self {
-        Self {
-            app_name: String::new(),
-            node_name: String::new(),
-            port_name: String::new(),
-        }
-    }
-}
 
 /// A single port-to-port connection specification within a rule.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,7 +176,8 @@ pub struct PendingConnection {
     pub output_port: PortId,
     /// Input port ID
     pub input_port: PortId,
-    /// Rule that triggered this connection
+    /// Rule that triggered this connection (for diagnostics/logging)
+    #[allow(dead_code)]
     pub rule_id: RuleId,
 }
 
@@ -252,19 +236,15 @@ impl RuleManager {
         self.rules.iter().find(|r| r.id == *id)
     }
 
-    /// Gets a mutable reference to a rule by ID.
-    pub fn get_rule_mut(&mut self, id: &RuleId) -> Option<&mut ConnectionRule> {
-        self.rules.iter_mut().find(|r| r.id == *id)
-    }
-
     /// Returns all enabled rules.
     pub fn enabled_rules(&self) -> impl Iterator<Item = &ConnectionRule> {
         self.rules.iter().filter(|r| r.enabled)
     }
 
     /// Toggles a rule's enabled state.
+    #[cfg(test)]
     pub fn toggle_enabled(&mut self, id: &RuleId) {
-        if let Some(rule) = self.get_rule_mut(id) {
+        if let Some(rule) = self.rules.iter_mut().find(|r| r.id == *id) {
             rule.enabled = !rule.enabled;
         }
     }
@@ -275,6 +255,7 @@ impl RuleManager {
     }
 
     /// Returns the number of rules.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.rules.len()
     }

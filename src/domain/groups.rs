@@ -89,6 +89,7 @@ impl NodeGroup {
     }
 
     /// Returns the number of runtime members.
+    #[cfg(test)]
     pub fn member_count(&self) -> usize {
         self.members.len()
     }
@@ -107,11 +108,6 @@ impl NodeGroup {
         } else {
             self.members.len()
         }
-    }
-
-    /// Returns true if the group is empty (no runtime members).
-    pub fn is_empty(&self) -> bool {
-        self.members.is_empty()
     }
 
     /// Returns true if the group has no members and no persistent members.
