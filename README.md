@@ -10,16 +10,16 @@ Existing PipeWire tools are fragmented: Helvum visualizes but doesn't control, p
 
 ## Features
 
-- **Visual graph editing** — Interactive node graph with pan, zoom, drag, multi-select, and smart auto-layout
+- **Visual graph editing** — Interactive node graph with pan, zoom, drag, and multi-select
 - **Full audio control** — Per-node and per-channel volume, mute, live signal metering with peak/RMS display
-- **Link management** — Create, remove, and toggle connections between any compatible ports
-- **Snapshots & presets** — Save and restore complete graph configurations with smart node matching
+- **Link management** — Create and remove connections between compatible ports
+- **Snapshots** — Save and restore graph configurations
 - **Command palette** — Fuzzy-searchable keyboard command interface (`Ctrl+K`)
-- **Safety modes** — Read-only mode, routing lock, stage mode, and panic mute for live performance
-- **Filtering & groups** — Filter by media class, direction, or activity; organize nodes into collapsible groups
+- **Safety modes** — Normal, read-only, and stage mode to prevent accidental changes
+- **Filtering & groups** — Filter by media class, direction, or activity; organize nodes into groups
 - **Node inspection** — Detailed metadata, port lists, format info, and connection status
 - **Remote control** — Headless gRPC server mode with SSH tunnel support for controlling remote machines
-- **Built-in help** — Press `H` for contextual help; `?` buttons throughout the UI
+- **Built-in help** — Press `H` for contextual help throughout the UI
 
 ## Run Modes
 
@@ -90,15 +90,11 @@ pipeflow -v       # Launch with verbose logging
 | `Ctrl+K` / `Ctrl+P` | Command palette |
 | `H` | Toggle help panel |
 | `I` | Toggle inspector |
-| `F` | Toggle filters |
-| `G` | Toggle groups |
-| `S` | Toggle snapshots |
-| `Space` / `F9` | Panic mute (instant silence) |
-| `Ctrl+L` | Toggle routing lock |
-| `Ctrl+Shift+R` | Smart reorganize layout |
+| `[` / `]` | Decrease / increase spacing |
 | `+` / `-` | Zoom in / out |
 | `Ctrl+0` | Reset view (fit all) |
-| `Ctrl+A` | Select all visible nodes |
+| `Ctrl+G` | Create group from selection |
+| `Delete` | Remove selected links |
 | `Escape` | Clear selection / close palette |
 
 ### Graph Navigation
@@ -109,15 +105,15 @@ pipeflow -v       # Launch with verbose logging
 - **Connect**: Drag from an output port to an input port
 - **Disconnect**: Right-click a link, or select and press Delete
 
-### Safety Features
+### Safety Modes
 
-Pipeflow includes protection mechanisms for live and recording scenarios:
+Pipeflow includes protection modes to prevent accidental changes:
 
 - **Normal mode** — Full control, no restrictions
 - **Read-only mode** — Observe without risk of changes
-- **Stage mode** — Maximum protection for live performance (read-only + routing lock + prominent panic button)
-- **Routing lock** — Freeze connections while still allowing volume adjustments
-- **Panic mute** — `Space` or `F9` instantly mutes all outputs; press again to restore
+- **Stage mode** — Maximum protection for live performance (blocks all routing and volume changes)
+
+Switch modes via the toolbar dropdown or the command palette.
 
 See [docs/SAFETY.md](docs/SAFETY.md) for detailed guidance on when to use each mode.
 
