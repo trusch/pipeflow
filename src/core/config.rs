@@ -169,15 +169,25 @@ impl Default for ShortcutConfig {
 
 impl Config {
     /// Loads configuration from the default location.
+    /// Falls back to defaults if the config file is corrupt or unreadable.
     pub fn load() -> Result<Self> {
         let path = Self::config_path()?;
 
         if path.exists() {
-            let contents = std::fs::read_to_string(&path)
-                .with_context(|| format!("Failed to read config from {:?}", path))?;
-            let config: Config =
-                toml::from_str(&contents).with_context(|| "Failed to parse config")?;
-            Ok(config)
+            let contents = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("Failed to read config from {:?}: {}. Using defaults.", path, e);
+                    return Ok(Self::default());
+                }
+            };
+            match toml::from_str::<Config>(&contents) {
+                Ok(config) => Ok(config),
+                Err(e) => {
+                    tracing::warn!("Failed to parse config from {:?}: {}. Using defaults.", path, e);
+                    Ok(Self::default())
+                }
+            }
         } else {
             // Return default and save it
             let config = Self::default();
@@ -241,20 +251,35 @@ impl LayoutManager {
     pub fn save(&self, state: &UiState) -> Result<()> {
         // Ensure directory exists
         if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create layout directory: {:?}", parent))?;
         }
 
-        let contents = serde_json::to_string_pretty(state)?;
-        std::fs::write(&self.path, contents)?;
+        let contents = serde_json::to_string_pretty(state)
+            .context("Failed to serialize UI state for layout save")?;
+        std::fs::write(&self.path, contents)
+            .with_context(|| format!("Failed to write layout file: {:?}", self.path))?;
         Ok(())
     }
 
     /// Loads UI state from disk.
+    /// Falls back to defaults if the layout file is corrupt or unreadable.
     pub fn load(&self) -> Result<UiState> {
         if self.path.exists() {
-            let contents = std::fs::read_to_string(&self.path)?;
-            let state: UiState = serde_json::from_str(&contents)?;
-            Ok(state)
+            let contents = match std::fs::read_to_string(&self.path) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("Failed to read layout file {:?}: {}. Using defaults.", self.path, e);
+                    return Ok(UiState::default());
+                }
+            };
+            match serde_json::from_str::<UiState>(&contents) {
+                Ok(state) => Ok(state),
+                Err(e) => {
+                    tracing::warn!("Failed to parse layout file {:?}: {}. Using defaults.", self.path, e);
+                    Ok(UiState::default())
+                }
+            }
         } else {
             Ok(UiState::default())
         }

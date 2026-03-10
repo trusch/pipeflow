@@ -240,7 +240,9 @@ fn run_pipewire_thread(
                 // Connection ended normally (disconnect command)
                 if running.load(std::sync::atomic::Ordering::SeqCst) {
                     // We're still supposed to be running, so this was an unexpected disconnect
-                    let _ = event_tx.send(PwEvent::Disconnected);
+                    if event_tx.send(PwEvent::Disconnected).is_err() {
+                        tracing::warn!("Failed to send Disconnected event — receiver dropped");
+                    }
                     attempt = 0;
                     delay_ms = INITIAL_RECONNECT_DELAY_MS;
                 } else {
@@ -262,10 +264,12 @@ fn run_pipewire_thread(
 
         // Notify about reconnection attempt
         tracing::info!("Reconnecting to PipeWire (attempt {})", attempt);
-        let _ = event_tx.send(PwEvent::Reconnecting {
+        if event_tx.send(PwEvent::Reconnecting {
             attempt,
             max_attempts: 0, // 0 = unlimited
-        });
+        }).is_err() {
+            tracing::warn!("Failed to send Reconnecting event — receiver dropped");
+        }
 
         // Wait before retry with exponential backoff (caps at MAX_RECONNECT_DELAY_MS)
         std::thread::sleep(std::time::Duration::from_millis(delay_ms));
@@ -299,7 +303,9 @@ fn try_connect_and_run(
         .map_err(|e| format!("Failed to connect to PipeWire: {}", e))?;
 
     tracing::info!("Connected to PipeWire");
-    let _ = event_tx.send(PwEvent::Connected);
+    if event_tx.send(PwEvent::Connected).is_err() {
+        tracing::warn!("Failed to send Connected event — receiver dropped");
+    }
 
     // Get the registry (wrapped in Rc for sharing with callbacks)
     let registry = Rc::new(core.get_registry()
