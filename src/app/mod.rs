@@ -814,10 +814,12 @@ impl PipeflowApp {
                         .default_open(true)
                         .show(ui, |ui| {
                             let rules_response = {
-                                let mut state = self.state.write();
+                                let mut guard = self.state.write();
+                                let state = &mut *guard;
                                 self.components.rules_panel.show(
                                     ui,
                                     &mut state.ui.rules,
+                                    &state.graph,
                                     &self.components.theme,
                                 )
                             };
