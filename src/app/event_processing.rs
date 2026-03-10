@@ -1,0 +1,535 @@
+//! PipeWire event processing.
+//!
+//! Handles events from PipeWire daemon including node/port/link lifecycle,
+//! meter updates, and connection state changes.
+
+use crate::core::commands::AppCommand;
+use crate::core::state::ConnectionState;
+use crate::domain::graph::{Link, Node, Port, PortDirection};
+use crate::domain::rules::RuleTrigger;
+use crate::pipewire::events::{MeterUpdate, PwEvent};
+use crate::util::id::NodeId;
+use crate::util::layout::{is_metering_node, get_metering_target_id, SmartLayout};
+use crate::util::spatial::Position;
+
+use super::command_handling::create_stable_identifier;
+use super::PipeflowApp;
+
+impl PipeflowApp {
+    /// Processes meter updates from real PipeWire streams or remote connection.
+    pub(super) fn process_meter_updates(&mut self) {
+        if !self.config.meters.enabled && !self.is_remote {
+            return;
+        }
+
+        let batches: Vec<Vec<MeterUpdate>> = if let Some(ref pw) = self.pw_connection {
+            pw.drain_meter_updates()
+        } else {
+            #[cfg(feature = "network")]
+            {
+                if let Some(ref remote) = self.remote_connection {
+                    remote.drain_meter_updates()
+                } else {
+                    Vec::new()
+                }
+            }
+            #[cfg(not(feature = "network"))]
+            {
+                Vec::new()
+            }
+        };
+
+        if !batches.is_empty() {
+            let mut state = self.state.write();
+            for batch in batches {
+                for update in batch {
+                    if let Some(meter) = state.graph.meters.get_mut(&update.node_id) {
+                        meter.update(update.peak, update.rms);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Updates link meter data based on source node meters.
+    ///
+    /// This drives the link flow visualization with glow and pulse effects.
+    pub(super) fn update_link_meters(&mut self) {
+        if !self.config.meters.enabled {
+            return;
+        }
+
+        let dt = 1.0 / 60.0;
+        let stale_threshold = std::time::Duration::from_millis(100);
+
+        let mut state = self.state.write();
+
+        // Collect link updates (to avoid borrow issues)
+        let updates: Vec<_> = state
+            .graph
+            .links
+            .values()
+            .filter(|link| link.is_active)
+            .map(|link| {
+                let activity = state
+                    .graph
+                    .meters
+                    .get(&link.output_node)
+                    .map(|meter| {
+                        if let Some(port) = state.graph.get_port(&link.output_port) {
+                            if let Some(channel) = port.channel {
+                                return meter.get_decayed_peak(channel as usize, stale_threshold);
+                            }
+                        }
+                        meter.get_decayed_max_peak(stale_threshold)
+                    })
+                    .unwrap_or(0.0);
+                (link.id, activity)
+            })
+            .collect();
+
+        // Apply updates
+        for (link_id, activity) in updates {
+            if let Some(link_meter) = state.graph.link_meters.get_mut(&link_id) {
+                link_meter.update(activity, dt);
+            }
+        }
+
+        // Decay inactive links
+        let inactive_links: Vec<_> = state
+            .graph
+            .links
+            .values()
+            .filter(|link| !link.is_active)
+            .map(|link| link.id)
+            .collect();
+
+        for link_id in inactive_links {
+            if let Some(link_meter) = state.graph.link_meters.get_mut(&link_id) {
+                link_meter.update(0.0, dt);
+            }
+        }
+    }
+
+    /// Enables or disables real PipeWire metering.
+    pub(super) fn set_real_metering(&mut self, enabled: bool) {
+        let command = if enabled {
+            tracing::info!("Enabling real PipeWire metering");
+            AppCommand::StartAllMeters
+        } else {
+            tracing::info!("Disabling real PipeWire metering");
+            AppCommand::StopAllMeters
+        };
+
+        if let Some(ref handler) = self.command_handler {
+            if let Err(e) = handler.execute_unchecked(command) {
+                tracing::error!("Failed to change meter state: {:?}", e);
+            }
+        }
+    }
+
+    /// Processes events from PipeWire or remote connection.
+    ///
+    /// This is the main event loop that handles:
+    /// - Connection state changes
+    /// - Node/Port/Link lifecycle events
+    /// - Volume and mute changes
+    /// - Meter updates
+    pub(super) fn process_pw_events(&mut self) {
+        let events = self.drain_events();
+        if events.is_empty() {
+            return;
+        }
+
+        // Check config before taking state lock
+        let meters_enabled = self.config.meters.enabled;
+
+        let mut state = self.state.write();
+        let mut should_start_meters = false;
+        let mut volume_changed = false;
+
+        for event in events {
+            match event {
+                PwEvent::Connected => {
+                    state.connection = ConnectionState::Connected;
+                    tracing::info!("Connected to PipeWire");
+                    if meters_enabled {
+                        should_start_meters = true;
+                    }
+                }
+                PwEvent::Disconnected => {
+                    state.connection = ConnectionState::Disconnected;
+                    // Persist all current volume states before clearing graph
+                    let volume_snapshot: Vec<_> = state.graph.volumes.iter()
+                        .filter_map(|(node_id, vol)| {
+                            state.graph.get_node(node_id).map(|node| {
+                                let id = create_stable_identifier(node, &state.graph);
+                                (id, vol.clone())
+                            })
+                        })
+                        .collect();
+                    for (identifier, volume) in volume_snapshot {
+                        state.ui.persist_volume(&identifier, volume);
+                    }
+                    state.clear_graph();
+                    tracing::warn!("Disconnected from PipeWire");
+                }
+                PwEvent::Reconnecting { attempt, max_attempts } => {
+                    state.connection = ConnectionState::Connecting;
+                    tracing::info!(
+                        "Reconnecting to PipeWire (attempt {}/{})",
+                        attempt,
+                        max_attempts
+                    );
+                }
+                PwEvent::Error(err) => {
+                    state.connection = ConnectionState::Error;
+                    tracing::error!("PipeWire error: {}", err);
+                }
+                PwEvent::NodeAdded(info) => {
+                    Self::handle_node_added(&mut state, info);
+                }
+                PwEvent::NodeRemoved(id) => {
+                    // Persist volume before removing node
+                    let vol_snapshot = state.graph.volumes.get(&id).cloned();
+                    let identifier = state.graph.get_node(&id)
+                        .map(|node| create_stable_identifier(node, &state.graph));
+                    if let (Some(vol), Some(ident)) = (vol_snapshot, identifier) {
+                        state.ui.persist_volume(&ident, vol);
+                    }
+                    state.graph.remove_node(&id);
+                    state.ui.cleanup_removed_node(&id);
+                }
+                PwEvent::PortAdded(info) => {
+                    let node_id = info.node_id;
+                    let port = Port {
+                        id: info.id,
+                        node_id: info.node_id,
+                        name: info.name,
+                        direction: info.direction,
+                        channel: info.channel,
+                        physical_path: info.physical_path,
+                        alias: info.alias,
+                        is_monitor: info.is_monitor,
+                        is_control: info.is_control,
+                    };
+                    state.graph.add_port(port);
+                    // Reconcile rules when ports are added (rules match on port names)
+                    Self::reconcile_rules_for_node(&mut state, node_id);
+                }
+                PwEvent::PortRemoved(id) => {
+                    state.graph.remove_port(&id);
+                }
+                PwEvent::LinkAdded(info) => {
+                    let link = Link {
+                        id: info.id,
+                        output_port: info.output_port,
+                        input_port: info.input_port,
+                        output_node: info.output_node,
+                        input_node: info.input_node,
+                        is_active: info.active,
+                        state: info.state,
+                    };
+                    state.graph.add_link(link);
+                }
+                PwEvent::LinkRemoved(id) => {
+                    state.graph.remove_link(&id);
+                }
+                PwEvent::VolumeChanged(node_id, volume) => {
+                    state.graph.volumes.insert(node_id, volume.clone());
+                    // Persist volume for restoration after node restart
+                    let identifier = state.graph.get_node(&node_id)
+                        .map(|node| create_stable_identifier(node, &state.graph));
+                    if let Some(ident) = identifier {
+                        state.ui.persist_volume(&ident, volume);
+                        volume_changed = true;
+                    }
+                }
+                PwEvent::MuteChanged(node_id, muted) => {
+                    // Clone what we need before mutating
+                    let updated = if let Some(vol) = state.graph.volumes.get_mut(&node_id) {
+                        vol.muted = muted;
+                        Some(vol.clone())
+                    } else {
+                        None
+                    };
+                    // Persist updated mute state
+                    if let Some(vol) = updated {
+                        let identifier = state.graph.get_node(&node_id)
+                            .map(|node| create_stable_identifier(node, &state.graph));
+                        if let Some(ident) = identifier {
+                            state.ui.persist_volume(&ident, vol);
+                            volume_changed = true;
+                        }
+                    }
+                }
+                PwEvent::VolumeControlFailed(node_id, error_msg) => {
+                    tracing::warn!("Volume control failed for {:?}: {}", node_id, error_msg);
+                    state.graph.volume_control_failed.insert(node_id, error_msg);
+                }
+                PwEvent::MeterUpdate(updates) => {
+                    for update in updates {
+                        if let Some(meter) = state.graph.meters.get_mut(&update.node_id) {
+                            meter.update(update.peak, update.rms);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        drop(state);
+
+        // Flag layout save if volume state changed (so it's persisted to disk)
+        if volume_changed {
+            self.components.needs_layout_save = true;
+        }
+
+        // Start real metering after processing all events (only in local mode)
+        if should_start_meters && !self.is_remote {
+            self.set_real_metering(true);
+        }
+    }
+
+    /// Drains events from PipeWire or remote connection.
+    fn drain_events(&self) -> Vec<PwEvent> {
+        if let Some(ref pw) = self.pw_connection {
+            pw.drain_events()
+        } else {
+            #[cfg(feature = "network")]
+            {
+                if let Some(ref remote) = self.remote_connection {
+                    remote.drain_events()
+                } else {
+                    Vec::new()
+                }
+            }
+            #[cfg(not(feature = "network"))]
+            {
+                Vec::new()
+            }
+        }
+    }
+
+    /// Handles a node being added to the graph.
+    ///
+    /// This is an associated function (not a method) to avoid borrow conflicts
+    /// when called from within a state lock.
+    fn handle_node_added(
+        state: &mut crate::core::state::AppState,
+        info: crate::pipewire::events::NodeInfo,
+    ) {
+        let media_class = info.media_class.clone();
+        let app_name = info.application_name.clone();
+        let node_name = info.name.clone();
+
+        let node = Node {
+            id: info.id,
+            name: info.name,
+            client_id: info.client_id,
+            media_class: info.media_class,
+            application_name: info.application_name,
+            description: info.description,
+            nick: info.nick,
+            format: info.format,
+            port_ids: Vec::new(),
+            is_active: true,
+            layer: info.layer,
+        };
+        state.graph.add_node(node);
+
+        // Create stable identifier for position restoration
+        // Uses the helper function which handles satellite/metering nodes specially
+        let identifier = if let Some(node) = state.graph.get_node(&info.id) {
+            create_stable_identifier(node, &state.graph)
+        } else {
+            // Fallback (shouldn't happen since we just added the node)
+            crate::util::id::NodeIdentifier::new(
+                node_name.clone(),
+                app_name,
+                media_class.as_ref().map(|mc| mc.display_name().to_string()),
+            )
+        };
+
+        // Try to restore position from persistent storage first
+        if !state.ui.restore_position_for_node(info.id, &identifier) {
+            // No saved position - calculate a new one
+            let layout = SmartLayout::new();
+            let config = layout.config();
+
+            // Check if this is a metering node (satellite) - position to the right of main node
+            let position = if is_metering_node(&node_name) {
+                if let Some(main_node_id) = get_metering_target_id(&node_name) {
+                    if let Some(main_pos) = state.ui.node_positions.get(&main_node_id) {
+                        // Position to the right of the main node
+                        Position::new(
+                            main_pos.x + config.node_width + config.satellite_gap,
+                            main_pos.y + config.satellite_offset_y,
+                        )
+                    } else {
+                        // Main node not positioned yet, use default
+                        Position::zero()
+                    }
+                } else {
+                    Position::zero()
+                }
+            } else {
+                // Regular node - place near connected nodes to minimize line lengths
+                let viewport_center = Position::zero();
+                layout.calculate_new_node_position(
+                    info.id,
+                    &state.graph,
+                    &state.ui.node_positions,
+                    viewport_center,
+                )
+            };
+
+            state.ui.animate_to_position(info.id, position, true);
+            state.ui.persistent_positions.insert(identifier.clone(), position);
+        }
+
+        // Restore uninteresting status from persistent storage
+        state.ui.restore_uninteresting_for_node(info.id, &identifier);
+
+        // Restore custom display name from persistent storage
+        state.ui.restore_custom_name_for_node(info.id, &identifier);
+
+        // Restore volume/mute state from persistent storage (e.g., after app restart)
+        if let Some(volume) = state.ui.restore_volume_for_node(&identifier).cloned() {
+            tracing::debug!("Restoring volume for node {:?}: master={:.3}, muted={}", info.id, volume.master, volume.muted);
+            state.graph.volumes.insert(info.id, volume);
+        }
+
+        // Reconcile group membership
+        state.ui.groups.reconcile_node(info.id, &identifier);
+
+        // Reconcile connection rules for this node
+        Self::reconcile_rules_for_node(state, info.id);
+    }
+
+    /// Evaluates connection rules when a node appears.
+    /// Queues pending connections to be created by the main loop.
+    fn reconcile_rules_for_node(
+        state: &mut crate::core::state::AppState,
+        trigger_node_id: NodeId,
+    ) {
+        let trigger_node = match state.graph.get_node(&trigger_node_id) {
+            Some(n) => n,
+            None => return,
+        };
+        let trigger_app_name = trigger_node.application_name.clone();
+        let trigger_node_name = trigger_node.name.clone();
+
+        // Collect all port IDs for the trigger node
+        let trigger_port_ids: Vec<_> = state.graph.ports.values()
+            .filter(|p| p.node_id == trigger_node_id)
+            .map(|p| p.id)
+            .collect();
+
+        // If node has no ports yet, skip (we'll reconcile when ports are added)
+        if trigger_port_ids.is_empty() {
+            return;
+        }
+
+        // Evaluate each enabled rule
+        let rules: Vec<_> = state.ui.rules.enabled_rules()
+            .map(|r| (r.id, r.trigger, r.exclusive, r.connections.clone()))
+            .collect();
+
+        for (rule_id, trigger, exclusive, connections) in rules {
+            for spec in &connections {
+                // Find all output ports matching the output pattern
+                let output_ports: Vec<_> = state.graph.ports.values()
+                    .filter(|p| p.direction == PortDirection::Output)
+                    .filter(|p| {
+                        let node = state.graph.get_node(&p.node_id);
+                        node.map(|n| {
+                            spec.output_pattern.matches(
+                                n.application_name.as_deref(),
+                                &n.name,
+                                &p.name,
+                            )
+                        }).unwrap_or(false)
+                    })
+                    .map(|p| (p.id, p.node_id))
+                    .collect();
+
+                // Find all input ports matching the input pattern
+                let input_ports: Vec<_> = state.graph.ports.values()
+                    .filter(|p| p.direction == PortDirection::Input)
+                    .filter(|p| {
+                        let node = state.graph.get_node(&p.node_id);
+                        node.map(|n| {
+                            spec.input_pattern.matches(
+                                n.application_name.as_deref(),
+                                &n.name,
+                                &p.name,
+                            )
+                        }).unwrap_or(false)
+                    })
+                    .map(|p| (p.id, p.node_id))
+                    .collect();
+
+                // Check trigger conditions and queue connections
+                for (output_port_id, output_node_id) in &output_ports {
+                    for (input_port_id, input_node_id) in &input_ports {
+                        let should_connect = match trigger {
+                            RuleTrigger::OnSourceAppear => *output_node_id == trigger_node_id,
+                            RuleTrigger::OnTargetAppear => *input_node_id == trigger_node_id,
+                            RuleTrigger::OnBothPresent => {
+                                *output_node_id == trigger_node_id || *input_node_id == trigger_node_id
+                            }
+                            RuleTrigger::ManualOnly => false,
+                        };
+
+                        if !should_connect {
+                            continue;
+                        }
+
+                        // Check if link already exists
+                        let link_exists = state.graph.links.values().any(|l| {
+                            l.output_port == *output_port_id && l.input_port == *input_port_id
+                        });
+
+                        if !link_exists {
+                            state.ui.rules.queue_connection(*output_port_id, *input_port_id, rule_id);
+                        }
+                    }
+                }
+
+                // Handle exclusive mode: queue disconnections for other links
+                if exclusive {
+                    // Find all links that connect to our matched ports but aren't in our rule
+                    for (output_port_id, _) in &output_ports {
+                        for link in state.graph.links.values() {
+                            if link.output_port == *output_port_id {
+                                // Check if this link's input is NOT one of our matched inputs
+                                let is_rule_link = input_ports.iter()
+                                    .any(|(ip, _)| link.input_port == *ip);
+                                if !is_rule_link {
+                                    state.ui.rules.queue_disconnection(link.id);
+                                }
+                            }
+                        }
+                    }
+                    for (input_port_id, _) in &input_ports {
+                        for link in state.graph.links.values() {
+                            if link.input_port == *input_port_id {
+                                // Check if this link's output is NOT one of our matched outputs
+                                let is_rule_link = output_ports.iter()
+                                    .any(|(op, _)| link.output_port == *op);
+                                if !is_rule_link {
+                                    state.ui.rules.queue_disconnection(link.id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Suppress unused variable warnings
+        let _ = trigger_app_name;
+        let _ = trigger_node_name;
+    }
+}

@@ -1,0 +1,79 @@
+[package]
+name = "pipeflow"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "A next-generation PipeWire graph and control application"
+license = "MIT OR Apache-2.0"
+authors = ["trusch"]
+repository = "https://github.com/trusch/pipeflow"
+keywords = ["pipewire", "audio", "graph", "control"]
+categories = ["multimedia::audio", "gui"]
+
+[dependencies]
+# PipeWire
+pipewire = { version = "0.8", features = ["v0_3_44"] }
+libspa = "0.8"
+
+# GUI
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "persistence", "x11", "wayland"] }
+egui = "0.33"
+egui_extras = "0.33"
+egui-snarl = "0.9"
+
+# State & Concurrency
+parking_lot = "0.12"
+crossbeam = { version = "0.8", features = ["crossbeam-channel"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+directories = "5.0"
+
+# Utilities
+thiserror = "2.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+fuzzy-matcher = "0.3"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+fastrand = "2.3.0"
+glob-match = "0.2"
+bytemuck = "1.0"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Network/gRPC (optional, enabled by "network" feature)
+tonic = { version = "0.12", optional = true }
+prost = { version = "0.13", optional = true }
+prost-types = { version = "0.13", optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "process", "signal", "time", "io-util"], optional = true }
+tokio-stream = { version = "0.1", optional = true }
+
+[build-dependencies]
+tonic-build = { version = "0.12", optional = true }
+
+[features]
+default = ["network"]
+network = ["tonic", "prost", "prost-types", "tokio", "tokio-stream", "tonic-build"]
+
+[dev-dependencies]
+criterion = "0.5"
+proptest = "1.0"
+mockall = "0.13"
+
+[[bench]]
+name = "graph_rendering"
+harness = false
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

@@ -1,0 +1,369 @@
+syntax = "proto3";
+
+package pipeflow;
+
+// Main Pipeflow service for remote control
+service Pipeflow {
+  // Establish connection and authenticate
+  rpc Authenticate(ConnectRequest) returns (ConnectResponse);
+
+  // Get current full graph state
+  rpc GetState(Empty) returns (GraphState);
+
+  // Subscribe to graph events (server streaming)
+  rpc SubscribeEvents(SubscribeRequest) returns (stream Event);
+
+  // Subscribe to meter updates (server streaming)
+  rpc SubscribeMeters(MeterSubscription) returns (stream MeterBatch);
+
+  // Execute a command
+  rpc ExecuteCommand(Command) returns (CommandResult);
+}
+
+// Empty message for requests with no parameters
+message Empty {}
+
+// Connection request with optional authentication
+message ConnectRequest {
+  // Protocol version for compatibility checking
+  uint32 protocol_version = 1;
+  // Optional authentication token
+  string token = 2;
+  // Client identifier for logging
+  string client_id = 3;
+}
+
+// Connection response
+message ConnectResponse {
+  // Whether connection was accepted
+  bool accepted = 1;
+  // Server protocol version
+  uint32 protocol_version = 2;
+  // Error message if not accepted
+  string error = 3;
+  // Server identifier
+  string server_id = 4;
+}
+
+// Request to subscribe to events
+message SubscribeRequest {
+  // Topics to subscribe to
+  repeated SubscriptionTopic topics = 1;
+}
+
+// Subscription topics
+enum SubscriptionTopic {
+  TOPIC_UNSPECIFIED = 0;
+  TOPIC_GRAPH = 1;        // Node/port/link changes
+  TOPIC_VOLUMES = 2;      // Volume/mute changes
+  TOPIC_SAFETY = 3;       // Safety mode changes
+  TOPIC_CONNECTION = 4;   // PipeWire connection status
+  TOPIC_ALL = 5;          // All topics
+}
+
+// Meter subscription configuration
+message MeterSubscription {
+  // Subscription level
+  MeterLevel level = 1;
+  // Maximum update rate in Hz (0 = unlimited)
+  uint32 max_rate_hz = 2;
+  // Activity threshold for ACTIVE level (0.0-1.0)
+  float threshold = 3;
+}
+
+// Meter subscription levels
+enum MeterLevel {
+  METER_LEVEL_UNSPECIFIED = 0;
+  METER_LEVEL_NONE = 1;    // No meter data
+  METER_LEVEL_ACTIVE = 2;  // Only nodes with activity > threshold
+  METER_LEVEL_FULL = 3;    // All nodes
+}
+
+// Event from server to client
+message Event {
+  // Monotonic sequence number for ordering
+  uint64 sequence = 1;
+  // Timestamp in milliseconds since server start
+  uint64 timestamp_ms = 2;
+  // Event payload
+  oneof event {
+    // Connection events
+    ConnectionStatus connection_status = 10;
+
+    // Graph events
+    NodeAdded node_added = 20;
+    NodeRemoved node_removed = 21;
+    PortAdded port_added = 22;
+    PortRemoved port_removed = 23;
+    LinkAdded link_added = 24;
+    LinkRemoved link_removed = 25;
+
+    // Volume events
+    VolumeChanged volume_changed = 30;
+    MuteChanged mute_changed = 31;
+
+    // Safety events
+    SafetyStatus safety_status = 40;
+  }
+}
+
+// PipeWire connection status
+message ConnectionStatus {
+  ConnectionState state = 1;
+  uint32 reconnect_attempt = 2;
+  uint32 max_reconnect_attempts = 3;
+  string error_message = 4;
+}
+
+enum ConnectionState {
+  CONNECTION_STATE_UNSPECIFIED = 0;
+  CONNECTION_STATE_CONNECTED = 1;
+  CONNECTION_STATE_DISCONNECTED = 2;
+  CONNECTION_STATE_RECONNECTING = 3;
+  CONNECTION_STATE_ERROR = 4;
+}
+
+// Node added event
+message NodeAdded {
+  Node node = 1;
+}
+
+// Node removed event
+message NodeRemoved {
+  uint32 node_id = 1;
+}
+
+// Port added event
+message PortAdded {
+  Port port = 1;
+}
+
+// Port removed event
+message PortRemoved {
+  uint32 port_id = 1;
+}
+
+// Link added event
+message LinkAdded {
+  Link link = 1;
+}
+
+// Link removed event
+message LinkRemoved {
+  uint32 link_id = 1;
+}
+
+// Volume changed event
+message VolumeChanged {
+  uint32 node_id = 1;
+  Volume volume = 2;
+}
+
+// Mute changed event
+message MuteChanged {
+  uint32 node_id = 1;
+  bool muted = 2;
+}
+
+// Safety status changed event
+message SafetyStatus {
+  SafetyMode mode = 1;
+  bool routing_locked = 2;
+  bool panic_active = 3;
+}
+
+enum SafetyMode {
+  SAFETY_MODE_UNSPECIFIED = 0;
+  SAFETY_MODE_NORMAL = 1;
+  SAFETY_MODE_READ_ONLY = 2;
+  SAFETY_MODE_STAGE = 3;
+}
+
+// Batch of meter updates
+message MeterBatch {
+  // Timestamp in milliseconds since server start
+  uint32 timestamp_ms = 1;
+  // Meter entries
+  repeated MeterEntry entries = 2;
+}
+
+// Single meter entry
+message MeterEntry {
+  // Node ID
+  uint32 node_id = 1;
+  // Peak levels per channel (0.0-1.0+)
+  repeated float peak = 2;
+  // RMS levels per channel (0.0-1.0+)
+  repeated float rms = 3;
+}
+
+// Command to execute
+message Command {
+  oneof command {
+    CreateLinkCommand create_link = 1;
+    RemoveLinkCommand remove_link = 2;
+    ToggleLinkCommand toggle_link = 3;
+    SetVolumeCommand set_volume = 4;
+    SetMuteCommand set_mute = 5;
+    SetChannelVolumeCommand set_channel_volume = 6;
+    PanicMuteCommand panic_mute = 7;
+    PanicRestoreCommand panic_restore = 8;
+    SetSafetyModeCommand set_safety_mode = 9;
+    ToggleRoutingLockCommand toggle_routing_lock = 10;
+  }
+}
+
+message CreateLinkCommand {
+  uint32 output_port_id = 1;
+  uint32 input_port_id = 2;
+}
+
+message RemoveLinkCommand {
+  uint32 link_id = 1;
+}
+
+message ToggleLinkCommand {
+  uint32 link_id = 1;
+  bool active = 2;
+}
+
+message SetVolumeCommand {
+  uint32 node_id = 1;
+  float volume = 2;
+}
+
+message SetMuteCommand {
+  uint32 node_id = 1;
+  bool muted = 2;
+}
+
+message SetChannelVolumeCommand {
+  uint32 node_id = 1;
+  uint32 channel = 2;
+  float volume = 3;
+}
+
+message PanicMuteCommand {}
+
+message PanicRestoreCommand {}
+
+message SetSafetyModeCommand {
+  SafetyMode mode = 1;
+}
+
+message ToggleRoutingLockCommand {}
+
+// Command execution result
+message CommandResult {
+  bool success = 1;
+  string error = 2;
+}
+
+// Full graph state snapshot
+message GraphState {
+  // All nodes
+  repeated Node nodes = 1;
+  // All ports
+  repeated Port ports = 2;
+  // All links
+  repeated Link links = 3;
+  // Volume controls per node
+  map<uint32, Volume> volumes = 4;
+  // Safety status
+  SafetyStatus safety = 5;
+  // Connection status
+  ConnectionStatus connection = 6;
+  // State sequence number
+  uint64 sequence = 7;
+  // Timestamp in milliseconds
+  uint64 timestamp_ms = 8;
+}
+
+// Node representation
+message Node {
+  uint32 id = 1;
+  string name = 2;
+  optional uint32 client_id = 3;
+  optional string media_class = 4;
+  optional string application_name = 5;
+  optional string description = 6;
+  optional string nick = 7;
+  optional AudioFormat format = 8;
+  repeated uint32 port_ids = 9;
+  bool is_active = 10;
+  // Layer classification in the PipeWire stack
+  NodeLayer layer = 11;
+  // Layer detection properties
+  optional string factory_name = 12;
+  optional uint32 device_id = 13;
+  optional string object_path = 14;
+  optional string link_group = 15;
+  optional string client_api = 16;
+  optional uint32 target_object = 17;
+}
+
+// Classification of nodes into PipeWire stack layers
+enum NodeLayer {
+  NODE_LAYER_UNSPECIFIED = 0;
+  // Hardware/device layer - physical devices from kernel (ALSA, etc.)
+  NODE_LAYER_HARDWARE = 1;
+  // PipeWire layer - logical nodes like channel splits, adapters
+  NODE_LAYER_PIPEWIRE = 2;
+  // Session layer - WirePlumber-managed application nodes
+  NODE_LAYER_SESSION = 3;
+}
+
+// Port representation
+message Port {
+  uint32 id = 1;
+  uint32 node_id = 2;
+  string name = 3;
+  PortDirection direction = 4;
+  optional uint32 channel = 5;
+  optional string physical_path = 6;
+  optional string alias = 7;
+  bool is_monitor = 8;
+  bool is_control = 9;
+}
+
+enum PortDirection {
+  PORT_DIRECTION_UNSPECIFIED = 0;
+  PORT_DIRECTION_INPUT = 1;
+  PORT_DIRECTION_OUTPUT = 2;
+}
+
+// Link representation
+message Link {
+  uint32 id = 1;
+  uint32 output_port_id = 2;
+  uint32 input_port_id = 3;
+  uint32 output_node_id = 4;
+  uint32 input_node_id = 5;
+  bool is_active = 6;
+  LinkState state = 7;
+}
+
+enum LinkState {
+  LINK_STATE_UNSPECIFIED = 0;
+  LINK_STATE_INIT = 1;
+  LINK_STATE_NEGOTIATING = 2;
+  LINK_STATE_ALLOCATING = 3;
+  LINK_STATE_PAUSED = 4;
+  LINK_STATE_ACTIVE = 5;
+  LINK_STATE_ERROR = 6;
+  LINK_STATE_UNLINKED = 7;
+}
+
+// Audio format information
+message AudioFormat {
+  uint32 sample_rate = 1;
+  uint32 channels = 2;
+  string format = 3;
+}
+
+// Volume control state
+message Volume {
+  float master = 1;
+  repeated float channels = 2;
+  bool muted = 3;
+}

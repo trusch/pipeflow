@@ -1,0 +1,37 @@
+{
+  "_meta": {
+    "category": "filters",
+    "description": "Filtering and searching nodes",
+    "version": "1.0.0"
+  },
+  "filters_overview": {
+    "title": "Filtering Your View",
+    "content": "When your graph gets busy, filters help you focus! The filter panel (press F) lets you show only the nodes you care about right now.\n\nFilters work together - enable multiple filters to narrow down exactly what you're looking for.",
+    "tip": "Filters hide nodes visually but don't affect your actual connections - everything keeps working!"
+  },
+  "search_filter": {
+    "title": "Search Box",
+    "content": "The quickest way to find something! Just start typing and nodes matching your search will be highlighted.\n\nThe search looks at:\n• Node names\n• Application names\n• Port names\n\nIt's fuzzy, so you don't need exact matches.",
+    "tip": "Try searching for your app name (like 'Firefox' or 'Spotify') to quickly find its audio."
+  },
+  "media_type_filters": {
+    "title": "Media Type Filters",
+    "content": "Quick filter buttons to show only certain types of content:\n\n🔊 Audio - Sound sources and sinks\n🎬 Video - Video streams (screen sharing, cameras)\n🎹 MIDI - Musical instrument data\n\nThese are your bread and butter for quickly cutting through the noise.",
+    "tip": "Working on music? Enable only Audio and MIDI to hide video clutter."
+  },
+  "direction_filters": {
+    "title": "Direction Filters",
+    "content": "Filter by which way the audio flows:\n\n➡️ Inputs - Things that receive audio (speakers, recorders)\n⬅️ Outputs - Things that produce audio (mics, apps)\n\nUseful when you're specifically looking for sources or destinations.",
+    "tip": "Looking for where to send audio? Filter to show only Inputs."
+  },
+  "active_filter": {
+    "title": "Active Only Filter",
+    "content": "The 'Active' filter shows only nodes that are currently doing something - they have audio flowing through them.\n\nThis is great for:\n• Finding what's currently making sound\n• Cleaning up your view during a session\n• Debugging audio issues",
+    "tip": "If you hear something but don't know where it's coming from, enable Active Only and look for the lit-up meters!"
+  },
+  "combining_filters": {
+    "title": "Combining Filters",
+    "content": "Filters combine with AND logic - a node must match ALL active filters to be shown.\n\nFor example: 'Audio' + 'Inputs' + 'Active' shows only audio input nodes that are currently receiving signal.\n\nThis lets you get very specific about what you're looking for!",
+    "tip": "Start broad and add filters to narrow down. You can always disable filters to see more."
+  }
+}

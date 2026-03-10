@@ -1,0 +1,37 @@
+{
+  "_meta": {
+    "category": "groups",
+    "description": "Organizing nodes into groups",
+    "version": "1.0.0"
+  },
+  "groups_overview": {
+    "title": "Grouping Nodes",
+    "content": "Groups help you organize related nodes together. Think of them like folders for your audio devices!\n\nWhen nodes are in a group:\n• They're visually highlighted with the same color\n• They move together when you drag one\n• You can collapse them to reduce clutter\n\nPerfect for keeping your setup tidy!",
+    "tip": "Press G to open the Groups panel and see all your groups."
+  },
+  "creating_groups": {
+    "title": "Creating a Group",
+    "content": "To create a group:\n\n1. Select the nodes you want to group (Shift+click or box select)\n2. Open the Groups panel (G)\n3. Click 'Create Group from Selection'\n4. Give your group a memorable name\n\nYour nodes are now a team!",
+    "tip": "Good group names describe the purpose: 'Streaming Setup', 'Music Production', 'Voice Chat'"
+  },
+  "group_colors": {
+    "title": "Group Colors",
+    "content": "Each group gets its own color, making it easy to spot which nodes belong together at a glance.\n\nColors are assigned automatically, but the visual distinction really helps when you have multiple groups.",
+    "tip": "The colored border around nodes shows their group membership - no label needed!"
+  },
+  "moving_groups": {
+    "title": "Moving Groups Together",
+    "content": "Here's where groups really shine! When you drag a node that's in a group, all the other nodes in that group follow along.\n\nThis makes it easy to:\n• Reorganize your layout without breaking groupings\n• Keep related nodes positioned together\n• Quickly make space for new additions",
+    "tip": "Hold Ctrl while dragging to move just one node without its group buddies."
+  },
+  "collapsing_groups": {
+    "title": "Collapsing Groups",
+    "content": "Groups can be collapsed to hide their members and reduce visual clutter. A collapsed group appears as a single compact node.\n\nGreat for:\n• Hiding complex setups you don't need to see\n• Focusing on what you're currently working on\n• Making large graphs more manageable",
+    "tip": "Collapsed groups still work normally - audio keeps flowing, you just don't see all the details."
+  },
+  "managing_groups": {
+    "title": "Managing Groups",
+    "content": "From the Groups panel you can:\n\n• See all your groups and their members\n• Add more nodes to existing groups\n• Remove nodes from groups\n• Delete entire groups (nodes stay, just ungrouped)\n• Expand or collapse group views",
+    "tip": "Deleting a group doesn't delete the nodes - it just removes the organizational container."
+  }
+}

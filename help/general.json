@@ -1,0 +1,37 @@
+{
+  "_meta": {
+    "category": "general",
+    "description": "General application help and getting started",
+    "version": "1.0.0"
+  },
+  "welcome": {
+    "title": "Welcome to Pipeflow! 🎛️",
+    "content": "Pipeflow is your friendly kitchen for cooking up audio connections! Think of it as a visual patchbay where you can see all your audio devices and applications, then connect them however you like.\n\nThe main view shows nodes (your audio sources and destinations) with ports you can wire together. It's like connecting cables, but without the mess!",
+    "tip": "Press H anytime to toggle the help panel, or look for ❓ buttons for context-specific help."
+  },
+  "what_is_pipewire": {
+    "title": "What is PipeWire?",
+    "content": "PipeWire is the modern audio and video routing system on Linux. It handles all the behind-the-scenes work of moving audio between applications, microphones, speakers, and more.\n\nPipeflow gives you a visual way to see and control these connections. Without Pipeflow, PipeWire still works automatically - but with it, you become the chef!",
+    "tip": "PipeWire handles audio, video, and MIDI - Pipeflow helps you route them all."
+  },
+  "nodes_and_ports": {
+    "title": "Nodes & Ports Explained",
+    "content": "Every box you see is a 'node' - it represents something that produces or consumes audio (or video, or MIDI). Think of nodes as instruments or devices.\n\nEach node has 'ports' - these are the connection points. Output ports (on the right) send audio out, and input ports (on the left) receive audio in.\n\nConnect an output to an input, and audio flows between them. Simple as that!",
+    "tip": "Hover over a port to see its name and what kind of signal it carries."
+  },
+  "making_connections": {
+    "title": "Making Connections",
+    "content": "To connect two nodes:\n\n1. Click and drag from an output port (right side of a node)\n2. Drop onto an input port (left side of another node)\n3. A link appears showing the connection!\n\nTo remove a connection, right-click on the link or select it and press Delete.",
+    "tip": "You can only connect compatible ports - audio to audio, MIDI to MIDI, etc."
+  },
+  "the_graph": {
+    "title": "The Graph View",
+    "content": "The main area shows your audio graph - all the nodes and their connections. You can:\n\n• Pan around by dragging on empty space\n• Zoom in/out with the scroll wheel (or +/- keys)\n• Select nodes by clicking them\n• Select multiple nodes with Shift+click or by drawing a box\n• Move selected nodes by dragging them",
+    "tip": "Press Ctrl+0 to reset the view and see everything at once."
+  },
+  "connection_status": {
+    "title": "Connection Status",
+    "content": "The colored dot in the toolbar shows your connection to PipeWire:\n\n🟢 Green: Connected and happy!\n🟡 Yellow: Connecting or reconnecting...\n🔴 Red: Disconnected - check if PipeWire is running\n\nPipeflow will automatically try to reconnect if the connection drops.",
+    "tip": "If you see red, try running 'systemctl --user restart pipewire' in a terminal."
+  }
+}

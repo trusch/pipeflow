@@ -1,0 +1,37 @@
+{
+  "_meta": {
+    "category": "snapshots",
+    "description": "Saving and restoring graph states",
+    "version": "1.0.0"
+  },
+  "snapshots_overview": {
+    "title": "Snapshots - Your Audio Time Machine",
+    "content": "Snapshots let you save your current setup and restore it later. It's like a 'save game' for your audio configuration!\n\nPerfect for:\n• Switching between different setups (work, music, gaming)\n• Experimenting without fear\n• Quickly restoring a known-good configuration",
+    "tip": "Press S to open the Snapshots panel. Save often, restore confidently!"
+  },
+  "what_gets_saved": {
+    "title": "What Gets Saved?",
+    "content": "A snapshot captures:\n\n🔗 Connections - Which nodes are wired to which\n🔊 Volumes - All volume levels and mute states\n📍 Positions - Where nodes are placed on the graph\n\nBasically, everything you'd need to recreate your exact setup!",
+    "tip": "Snapshots are stored locally - they persist even after closing Pipeflow."
+  },
+  "creating_snapshots": {
+    "title": "Creating a Snapshot",
+    "content": "To save your current setup:\n\n1. Open the Snapshots panel (S)\n2. Click 'Save Snapshot'\n3. Give it a descriptive name\n\nThe snapshot is saved immediately with the current timestamp.",
+    "tip": "Use descriptive names like 'Streaming Setup v2' or 'Recording Session 2024-01' - future you will thank you!"
+  },
+  "restoring_snapshots": {
+    "title": "Restoring a Snapshot",
+    "content": "To restore a saved setup:\n\n1. Open the Snapshots panel (S)\n2. Find the snapshot you want\n3. Click 'Restore'\n\nPipeflow will recreate the connections and settings as best it can.\n\nNote: If some nodes no longer exist (apps closed, devices unplugged), those connections will be skipped.",
+    "tip": "Restoring only affects nodes that exist - it won't launch applications for you."
+  },
+  "partial_restore": {
+    "title": "Smart Matching",
+    "content": "When you restore, Pipeflow intelligently matches nodes:\n\n• It looks for nodes with the same name and type\n• If an exact match isn't found, it tries similar matches\n• Unmatched connections are skipped (no errors!)\n\nThis means snapshots work even when your system changes a bit.",
+    "tip": "Node IDs change when apps restart - that's why Pipeflow matches by name and type instead."
+  },
+  "snapshot_management": {
+    "title": "Managing Snapshots",
+    "content": "In the Snapshots panel you can:\n\n• See all saved snapshots with timestamps\n• Preview what each snapshot contains (connections, volumes)\n• Restore any snapshot\n• Delete snapshots you no longer need\n\nSnapshots don't take much space, so keep as many as you like!",
+    "tip": "You can create multiple snapshots for the same basic setup - one for each tweak you might want."
+  }
+}

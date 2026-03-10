@@ -1,0 +1,42 @@
+{
+  "_meta": {
+    "category": "audio",
+    "description": "Audio concepts and controls",
+    "version": "1.0.0"
+  },
+  "audio_basics": {
+    "title": "Audio Basics",
+    "content": "Sound in computers is just numbers changing really fast! Here's what you need to know:\n\n• Sample Rate - How many times per second we measure the sound (usually 44100 or 48000)\n• Channels - Separate audio streams (stereo = 2 channels: left and right)\n• Volume - How loud the sound is (0% to 100%, sometimes higher)\n\nPipeflow lets you route and control all of this visually.",
+    "tip": "Most audio is stereo (2 channels), but surround sound can have 5.1 or 7.1 channels!"
+  },
+  "volume_control": {
+    "title": "Volume Control",
+    "content": "Every audio node can have its volume adjusted:\n\n🔊 Master Volume - Overall level for the node\n📊 Per-Channel - Individual control over left, right, etc.\n🔇 Mute - Complete silence without changing volume settings\n\nVolume goes from 0% (silent) to 200% (boosted). 100% is unity gain - the original level.",
+    "tip": "Boosting above 100% can cause distortion. If audio sounds crunchy, try lowering the volume."
+  },
+  "understanding_meters": {
+    "title": "Understanding Meters",
+    "content": "The animated bars on nodes show audio levels:\n\n🟢 Green - Good levels, nice and healthy\n🟡 Yellow - Getting loud, watch it\n🔴 Red - Too hot! Might distort\n\nThe meter shows two things:\n• Peak - The loudest moment (fast, jumpy)\n• RMS - Average loudness (smoother, represents perceived volume)",
+    "tip": "Aim for green with occasional yellow. Constant red means something's too loud!"
+  },
+  "link_flow_visualization": {
+    "title": "Connection Activity",
+    "content": "Links between nodes light up when audio flows through them! This helps you:\n\n• See which connections are actually carrying signal\n• Trace the path of audio through your setup\n• Find 'dead' connections that aren't working\n\nBrighter glow = more audio activity.",
+    "tip": "If a link doesn't light up when you expect audio, the source might be muted or silent."
+  },
+  "media_classes": {
+    "title": "Media Classes Explained",
+    "content": "PipeWire categorizes devices by what they do:\n\n🔊 Audio/Sink - Plays sound (speakers, headphones)\n🎤 Audio/Source - Captures sound (microphones)\n🔀 Audio/Duplex - Does both (audio interfaces)\n🎬 Video/Source - Captures video (cameras, screen share)\n🎹 Midi/Bridge - Musical instrument data\n\nThis helps you quickly identify what each node does.",
+    "tip": "The icon on each node gives you a quick visual hint about its media class."
+  },
+  "channels_explained": {
+    "title": "Channels & Ports",
+    "content": "Each audio stream can have multiple channels:\n\n• Mono - 1 channel (basic microphone)\n• Stereo - 2 channels (FL=Front Left, FR=Front Right)\n• Surround - 5.1 has 6 channels, 7.1 has 8\n\nEach channel becomes a port on the node. You can connect them individually for complex routing!",
+    "tip": "Connecting stereo to mono? The channels will be mixed together automatically."
+  },
+  "latency": {
+    "title": "About Latency",
+    "content": "Latency is the delay between input and output. Lower is better, especially for:\n\n• Live music performance\n• Voice chat\n• Gaming\n\nPipeWire is designed for low latency. If you experience delay, check your audio settings or buffer sizes.",
+    "tip": "High latency usually comes from applications, not PipeWire itself."
+  }
+}
