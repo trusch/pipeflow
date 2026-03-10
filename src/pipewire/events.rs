@@ -305,7 +305,7 @@ impl PortInfo {
     pub fn from_properties(id: u32, props: &std::collections::HashMap<String, String>) -> Self {
         let direction = props
             .get("port.direction")
-            .and_then(|s| PortDirection::from_str(s))
+            .and_then(|s| PortDirection::from_pw_str(s))
             .unwrap_or(PortDirection::Output);
 
         Self {

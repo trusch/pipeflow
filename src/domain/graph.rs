@@ -198,7 +198,7 @@ pub enum PortDirection {
 
 impl PortDirection {
     /// Parses a port direction from a PipeWire string.
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn from_pw_str(s: &str) -> Option<Self> {
         match s {
             "in" => Some(Self::Input),
             "out" => Some(Self::Output),
@@ -476,8 +476,8 @@ mod tests {
 
     #[test]
     fn test_port_direction() {
-        let input = PortDirection::from_str("in").unwrap();
-        let output = PortDirection::from_str("out").unwrap();
+        let input = PortDirection::from_pw_str("in").unwrap();
+        let output = PortDirection::from_pw_str("out").unwrap();
 
         assert_eq!(input, PortDirection::Input);
         assert_eq!(output, PortDirection::Output);
@@ -538,5 +538,170 @@ mod tests {
         assert!(LinkState::Paused.is_healthy());
         assert!(!LinkState::Error.is_healthy());
         assert!(!LinkState::Init.is_healthy());
+    }
+
+    #[test]
+    fn test_media_class_layout_column() {
+        assert_eq!(MediaClass::AudioSource.layout_column(), -1);
+        assert_eq!(MediaClass::AudioSink.layout_column(), 1);
+        assert_eq!(MediaClass::AudioDevice.layout_column(), 0);
+        assert_eq!(MediaClass::StreamOutputAudio.layout_column(), -1);
+        assert_eq!(MediaClass::StreamInputAudio.layout_column(), 1);
+    }
+
+    #[test]
+    fn test_media_class_all_variants_have_display_name() {
+        let classes = vec![
+            MediaClass::AudioSource, MediaClass::AudioSink,
+            MediaClass::StreamOutputAudio, MediaClass::StreamInputAudio,
+            MediaClass::VideoSource, MediaClass::VideoSink,
+            MediaClass::MidiSource, MediaClass::MidiSink,
+            MediaClass::AudioVideoSource, MediaClass::AudioDevice,
+            MediaClass::VideoDevice, MediaClass::Other("Custom".into()),
+        ];
+        for mc in &classes {
+            assert!(!mc.display_name().is_empty());
+        }
+    }
+
+    #[test]
+    fn test_audio_video_source_is_both() {
+        assert!(MediaClass::AudioVideoSource.is_audio());
+        assert!(MediaClass::AudioVideoSource.is_video());
+        assert!(!MediaClass::AudioVideoSource.is_midi());
+    }
+
+    #[test]
+    fn test_node_layer_all_variants() {
+        assert_eq!(NodeLayer::Hardware.display_name(), "Hardware");
+        assert_eq!(NodeLayer::Pipewire.display_name(), "PipeWire");
+        assert_eq!(NodeLayer::Session.display_name(), "Session");
+        assert_eq!(NodeLayer::Hardware.short_label(), "HW");
+        assert_eq!(NodeLayer::Pipewire.short_label(), "PW");
+        assert_eq!(NodeLayer::Session.short_label(), "SM");
+        for layer in &[NodeLayer::Hardware, NodeLayer::Pipewire, NodeLayer::Session] {
+            assert!(!layer.description().is_empty());
+        }
+    }
+
+    #[test]
+    fn test_port_display_name_with_alias() {
+        let mut port = Port::new(PortId::new(1), NodeId::new(1), "raw".to_string(), PortDirection::Input);
+        assert_eq!(port.display_name(), "raw");
+        port.alias = Some("Friendly Name".to_string());
+        assert_eq!(port.display_name(), "Friendly Name");
+    }
+
+    #[test]
+    fn test_link_creation_and_state() {
+        let link = Link::new(
+            crate::util::id::LinkId::new(1),
+            PortId::new(1), PortId::new(2),
+            NodeId::new(10), NodeId::new(20),
+        );
+        assert!(link.is_active);
+        assert_eq!(link.state, LinkState::Init);
+        assert_eq!(link.state.display_name(), "Initializing");
+    }
+
+    #[test]
+    fn test_link_state_display_names_unique() {
+        let states = [
+            LinkState::Init, LinkState::Negotiating, LinkState::Allocating,
+            LinkState::Paused, LinkState::Active, LinkState::Error, LinkState::Unlinked,
+        ];
+        let names: std::collections::HashSet<_> = states.iter().map(|s| s.display_name()).collect();
+        assert_eq!(names.len(), states.len(), "All link state display names should be unique");
+    }
+
+    #[test]
+    fn test_audio_format_default() {
+        let fmt = AudioFormat::default();
+        assert_eq!(fmt.sample_rate, 48000);
+        assert_eq!(fmt.channels, 2);
+        assert_eq!(fmt.format, "F32LE");
+    }
+
+    #[test]
+    fn test_port_direction_invalid_input() {
+        assert!(PortDirection::from_pw_str("invalid").is_none());
+        assert!(PortDirection::from_pw_str("").is_none());
+        assert!(PortDirection::from_pw_str("IN").is_none()); // Case-sensitive
+    }
+
+    #[test]
+    fn test_node_input_output_ports() {
+        let mut ports_map = HashMap::new();
+        let p1 = Port::new(PortId::new(1), NodeId::new(10), "in_L".into(), PortDirection::Input);
+        let p2 = Port::new(PortId::new(2), NodeId::new(10), "in_R".into(), PortDirection::Input);
+        let p3 = Port::new(PortId::new(3), NodeId::new(10), "out_L".into(), PortDirection::Output);
+        ports_map.insert(p1.id, p1);
+        ports_map.insert(p2.id, p2);
+        ports_map.insert(p3.id, p3);
+
+        let mut node = Node::new(NodeId::new(10), "test".into());
+        node.port_ids = vec![PortId::new(1), PortId::new(2), PortId::new(3)];
+
+        assert_eq!(node.input_ports(&ports_map).len(), 2);
+        assert_eq!(node.output_ports(&ports_map).len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_media_class_str() -> impl Strategy<Value = String> {
+        prop_oneof![
+            Just("Audio/Source".to_string()),
+            Just("Audio/Sink".to_string()),
+            Just("Stream/Output/Audio".to_string()),
+            Just("Stream/Input/Audio".to_string()),
+            Just("Video/Source".to_string()),
+            Just("Video/Sink".to_string()),
+            Just("Midi/Source".to_string()),
+            Just("Midi/Sink".to_string()),
+            Just("Audio/Video/Source".to_string()),
+            Just("Audio/Device".to_string()),
+            Just("Video/Device".to_string()),
+            "[a-zA-Z/]{1,30}",
+        ]
+    }
+
+    proptest! {
+        #[test]
+        fn media_class_roundtrip_never_panics(s in arb_media_class_str()) {
+            let mc = MediaClass::from_pipewire_str(&s);
+            // display_name should never panic
+            let _ = mc.display_name();
+            let _ = mc.is_audio();
+            let _ = mc.is_video();
+            let _ = mc.is_midi();
+            let _ = mc.layout_column();
+        }
+
+        #[test]
+        fn port_can_connect_is_symmetric_for_same_direction(
+            id1 in 1u32..1000,
+            id2 in 1u32..1000,
+        ) {
+            let p1 = Port::new(PortId::new(id1), NodeId::new(1), "a".into(), PortDirection::Output);
+            let p2 = Port::new(PortId::new(id2), NodeId::new(2), "b".into(), PortDirection::Output);
+            // Same direction should never connect
+            assert!(!p1.can_connect_to(&p2));
+            assert!(!p2.can_connect_to(&p1));
+        }
+
+        #[test]
+        fn port_can_connect_opposite_always_works(
+            id1 in 1u32..1000,
+            id2 in 1u32..1000,
+        ) {
+            let p1 = Port::new(PortId::new(id1), NodeId::new(1), "a".into(), PortDirection::Output);
+            let p2 = Port::new(PortId::new(id2), NodeId::new(2), "b".into(), PortDirection::Input);
+            assert!(p1.can_connect_to(&p2));
+            assert!(p2.can_connect_to(&p1));
+        }
     }
 }

@@ -318,4 +318,191 @@ mod tests {
         assert!(!filters.matches(&ignored));
         assert!(!filters.matches(&video));
     }
+
+    #[test]
+    fn test_filter_empty_passes_all() {
+        let filters = FilterSet::new();
+        assert!(filters.is_empty());
+        let node = make_node("Anything", None, None);
+        assert!(filters.matches(&node));
+    }
+
+    #[test]
+    fn test_filter_set_clear() {
+        let mut filters = FilterSet::new();
+        filters.add_include(FilterPredicate::AudioOnly);
+        filters.set_search(Some("test".into()));
+        assert!(!filters.is_empty());
+        filters.clear();
+        assert!(filters.is_empty());
+    }
+
+    #[test]
+    fn test_filter_description_formats() {
+        let mut filters = FilterSet::new();
+        assert_eq!(filters.description(), "No filters");
+
+        filters.add_include(FilterPredicate::AudioOnly);
+        assert!(filters.description().contains("Include"));
+
+        filters.add_exclude(FilterPredicate::VideoOnly);
+        assert!(filters.description().contains("Exclude"));
+
+        filters.set_search(Some("test".into()));
+        assert!(filters.description().contains("Search"));
+    }
+
+    #[test]
+    fn test_filter_add_include_deduplication() {
+        let mut filters = FilterSet::new();
+        filters.add_include(FilterPredicate::AudioOnly);
+        filters.add_include(FilterPredicate::AudioOnly);
+        assert_eq!(filters.include.len(), 1);
+    }
+
+    #[test]
+    fn test_filter_set_search_empty_becomes_none() {
+        let mut filters = FilterSet::new();
+        filters.set_search(Some("".into()));
+        assert!(filters.search.is_none());
+    }
+
+    #[test]
+    fn test_filter_search_case_insensitive() {
+        let mut filters = FilterSet::new();
+        filters.set_search(Some("SPEAK".into()));
+        let node = make_node("speakers", None, None);
+        assert!(filters.matches(&node));
+    }
+
+    #[test]
+    fn test_filter_search_matches_app_name() {
+        let mut filters = FilterSet::new();
+        filters.set_search(Some("fire".into()));
+        let node = make_node("some_node", None, Some("Firefox"));
+        assert!(filters.matches(&node));
+    }
+
+    #[test]
+    fn test_filter_node_name_predicate() {
+        let predicate = FilterPredicate::NodeName("speak".to_string());
+        let matching = make_node("Speakers", None, None);
+        let non_matching = make_node("Microphone", None, None);
+        assert!(predicate.matches(&matching));
+        assert!(!predicate.matches(&non_matching));
+    }
+
+    #[test]
+    fn test_filter_active_only() {
+        let predicate = FilterPredicate::ActiveOnly;
+        let mut active_node = make_node("Active", None, None);
+        active_node.is_active = true;
+        let mut inactive_node = make_node("Inactive", None, None);
+        inactive_node.is_active = false;
+        assert!(predicate.matches(&active_node));
+        assert!(!predicate.matches(&inactive_node));
+    }
+
+    #[test]
+    fn test_filter_midi_only() {
+        let predicate = FilterPredicate::MidiOnly;
+        let midi = make_node("MIDI", Some(MediaClass::MidiSource), None);
+        let audio = make_node("Audio", Some(MediaClass::AudioSink), None);
+        assert!(predicate.matches(&midi));
+        assert!(!predicate.matches(&audio));
+    }
+
+    #[test]
+    fn test_filter_video_only() {
+        let predicate = FilterPredicate::VideoOnly;
+        let video = make_node("Video", Some(MediaClass::VideoSource), None);
+        let audio = make_node("Audio", Some(MediaClass::AudioSink), None);
+        assert!(predicate.matches(&video));
+        assert!(!predicate.matches(&audio));
+    }
+
+    #[test]
+    fn test_filter_remove_include() {
+        let mut filters = FilterSet::new();
+        filters.add_include(FilterPredicate::AudioOnly);
+        filters.add_include(FilterPredicate::VideoOnly);
+        assert_eq!(filters.include.len(), 2);
+        filters.remove_include(&FilterPredicate::AudioOnly);
+        assert_eq!(filters.include.len(), 1);
+    }
+
+    #[test]
+    fn test_filter_direction_with_ports() {
+        let predicate = FilterPredicate::Direction(PortDirection::Input);
+        let mut node = Node::new(NodeId::new(1), "test".into());
+        node.port_ids = vec![PortId::new(10)];
+
+        let mut ports = HashMap::new();
+        ports.insert(PortId::new(10), Port {
+            id: PortId::new(10),
+            node_id: NodeId::new(1),
+            name: "in".into(),
+            direction: PortDirection::Input,
+            channel: None,
+            physical_path: None,
+            alias: None,
+            is_monitor: false,
+            is_control: false,
+        });
+
+        assert!(predicate.matches_with_ports(&node, &ports));
+
+        // Without ports, Direction always returns true from matches()
+        assert!(predicate.matches(&node));
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use crate::domain::graph::{Node, NodeLayer};
+    use crate::util::id::NodeId;
+    use proptest::prelude::*;
+
+    fn arb_node() -> impl Strategy<Value = Node> {
+        (
+            1u32..10000,
+            "[a-zA-Z ]{1,20}",
+            proptest::option::of("[a-zA-Z ]{1,20}"),
+            proptest::bool::ANY,
+        )
+            .prop_map(|(id, name, app_name, is_active)| {
+                let mut node = Node::new(NodeId::new(id), name);
+                node.application_name = app_name;
+                node.is_active = is_active;
+                node.layer = NodeLayer::Session;
+                node
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn empty_filter_passes_any_node(node in arb_node()) {
+            let filters = FilterSet::new();
+            assert!(filters.matches(&node));
+        }
+
+        #[test]
+        fn active_only_filter_correct(node in arb_node()) {
+            let mut filters = FilterSet::new();
+            filters.add_include(FilterPredicate::ActiveOnly);
+            assert_eq!(filters.matches(&node), node.is_active);
+        }
+
+        #[test]
+        fn search_never_panics(
+            node in arb_node(),
+            search in "[a-zA-Z]{0,10}",
+        ) {
+            let mut filters = FilterSet::new();
+            filters.set_search(Some(search));
+            // Should not panic regardless of input
+            let _ = filters.matches(&node);
+        }
+    }
 }

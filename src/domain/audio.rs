@@ -455,6 +455,69 @@ mod tests {
     }
 
     #[test]
+    fn test_volume_control_set_channel_clamping() {
+        let mut vol = VolumeControl::default();
+        vol.set_channel(0, -1.0);
+        assert_eq!(vol.channels[0], 0.0);
+        vol.set_channel(0, 5.0);
+        assert_eq!(vol.channels[0], 2.0);
+    }
+
+    #[test]
+    fn test_volume_control_set_channel_out_of_bounds() {
+        let mut vol = VolumeControl::default();
+        // Should not panic on out-of-bounds channel
+        vol.set_channel(99, 0.5);
+        assert_eq!(vol.channels.len(), 2); // Unchanged
+    }
+
+    #[test]
+    fn test_volume_control_default_values() {
+        let vol = VolumeControl::default();
+        assert_eq!(vol.master, 1.0);
+        assert!(!vol.muted);
+        assert_eq!(vol.step, 0.05);
+        assert_eq!(vol.channels.len(), 2);
+    }
+
+    #[test]
+    fn test_linear_to_db_common_values() {
+        // -6dB ≈ 0.5 linear
+        let db = linear_to_db(0.5);
+        assert!((db - (-6.02)).abs() < 0.1);
+        // -20dB = 0.1 linear
+        let db = linear_to_db(0.1);
+        assert!((db - (-20.0)).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_linear_to_db_negative_input() {
+        assert_eq!(linear_to_db(-1.0), f32::NEG_INFINITY);
+    }
+
+    #[test]
+    fn test_meter_data_update_channel_resize() {
+        let mut meter = MeterData::default();
+        // Update with more channels than peak_hold
+        meter.update(vec![0.5, 0.3, 0.7], vec![0.3, 0.2, 0.5]);
+        assert_eq!(meter.peak.len(), 3);
+        assert_eq!(meter.rms.len(), 3);
+        // peak_hold only updated for existing indices
+        assert_eq!(meter.peak_hold.len(), 2);
+    }
+
+    #[test]
+    fn test_meter_data_max_peak_empty() {
+        let meter = MeterData {
+            peak: vec![],
+            rms: vec![],
+            peak_hold: vec![],
+            last_update: std::time::Instant::now(),
+        };
+        assert_eq!(meter.max_peak(), 0.0);
+    }
+
+    #[test]
     fn test_link_meter_full_cycle() {
         // Simulate a realistic usage cycle: silence -> music -> silence
         let mut link_meter = LinkMeterData::default();
@@ -483,5 +546,94 @@ mod tests {
             link_meter.update(0.0, dt);
         }
         assert!(link_meter.glow_intensity() < 0.05, "Should be nearly zero after 2 seconds");
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn volume_clamping_always_in_range(v in -100.0f32..100.0) {
+            let mut vol = VolumeControl::default();
+            vol.set_all_channels(v);
+            assert!(vol.master >= 0.0);
+            assert!(vol.master <= 2.0);
+            for ch in &vol.channels {
+                assert!(*ch >= 0.0);
+                assert!(*ch <= 2.0);
+            }
+        }
+
+        #[test]
+        fn volume_channel_clamping(ch_val in -100.0f32..100.0) {
+            let mut vol = VolumeControl::default();
+            vol.set_channel(0, ch_val);
+            assert!(vol.channels[0] >= 0.0);
+            assert!(vol.channels[0] <= 2.0);
+        }
+
+        #[test]
+        fn linear_to_db_never_panics(v in -1000.0f32..1000.0) {
+            let db = linear_to_db(v);
+            // Should be either a finite number or NEG_INFINITY
+            assert!(db.is_finite() || db == f32::NEG_INFINITY);
+        }
+
+        #[test]
+        fn meter_update_never_panics(
+            peaks in proptest::collection::vec(0.0f32..2.0, 0..8),
+            rms in proptest::collection::vec(0.0f32..2.0, 0..8),
+        ) {
+            let mut meter = MeterData::default();
+            meter.update(peaks, rms);
+            // max_peak should be non-negative
+            assert!(meter.max_peak() >= 0.0);
+        }
+
+        #[test]
+        fn link_meter_smoothed_activity_stays_non_negative(
+            activity in 0.0f32..2.0,
+            dt in 0.001f32..0.1,
+        ) {
+            let mut lm = LinkMeterData::default();
+            for _ in 0..100 {
+                lm.update(activity, dt);
+            }
+            assert!(lm.smoothed_activity >= 0.0);
+
+            // Now decay
+            for _ in 0..100 {
+                lm.update(0.0, dt);
+            }
+            assert!(lm.smoothed_activity >= 0.0);
+        }
+
+        #[test]
+        fn link_meter_glow_intensity_always_clamped(activity in 0.0f32..5.0) {
+            let lm = LinkMeterData {
+                smoothed_activity: activity,
+                ..LinkMeterData::default()
+            };
+            let glow = lm.glow_intensity();
+            assert!(glow >= 0.0);
+            assert!(glow <= 1.0);
+        }
+
+        #[test]
+        fn link_meter_color_hint_always_valid(
+            activity in 0.0f32..2.0,
+            clipping in proptest::bool::ANY,
+        ) {
+            let lm = LinkMeterData {
+                smoothed_activity: activity,
+                is_clipping: clipping,
+                ..LinkMeterData::default()
+            };
+            let hint = lm.color_hint();
+            assert!(hint <= 2);
+        }
     }
 }

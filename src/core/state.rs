@@ -1134,4 +1134,194 @@ mod tests {
         assert!(graph.meters.is_empty());
         assert!(graph.volumes.is_empty());
     }
+
+    /// Stress test: 500-node graph operations should not have quadratic blowup.
+    #[test]
+    fn test_500_node_graph_operations() {
+        let mut graph = GraphState::default();
+        let start = std::time::Instant::now();
+
+        // Add 500 nodes with 2 ports each
+        for i in 0..500u32 {
+            let node = Node::new(NodeId::new(i), format!("Node_{}", i));
+            graph.add_node(node);
+            let out_port = Port::new(
+                PortId::new(i * 10),
+                NodeId::new(i),
+                "out".into(),
+                PortDirection::Output,
+            );
+            let in_port = Port::new(
+                PortId::new(i * 10 + 1),
+                NodeId::new(i),
+                "in".into(),
+                PortDirection::Input,
+            );
+            graph.add_port(out_port);
+            graph.add_port(in_port);
+        }
+
+        // Create a chain of links: node[0] -> node[1] -> ... -> node[499]
+        for i in 0..499u32 {
+            let link = Link::new(
+                LinkId::new(i + 10000),
+                PortId::new(i * 10),
+                PortId::new((i + 1) * 10 + 1),
+                NodeId::new(i),
+                NodeId::new(i + 1),
+            );
+            graph.add_link(link);
+        }
+
+        assert_eq!(graph.nodes.len(), 500);
+        assert_eq!(graph.ports.len(), 1000);
+        assert_eq!(graph.links.len(), 499);
+
+        // Query operations
+        let ports = graph.ports_for_node(&NodeId::new(250));
+        assert_eq!(ports.len(), 2);
+        let links = graph.links_for_node(&NodeId::new(250));
+        assert_eq!(links.len(), 2); // one incoming, one outgoing
+
+        // Remove a node in the middle - should cascade
+        graph.remove_node(&NodeId::new(250));
+        assert!(graph.get_node(&NodeId::new(250)).is_none());
+        assert_eq!(graph.nodes.len(), 499);
+        assert_eq!(graph.links.len(), 497); // 2 links removed
+
+        let elapsed = start.elapsed();
+        assert!(elapsed.as_secs() < 2, "500-node operations should complete in <2s, took {:?}", elapsed);
+    }
+
+    /// Test: concurrent SharedState access (basic soundness).
+    #[test]
+    fn test_shared_state_concurrent_access() {
+        let state = create_shared_state();
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                let s = state.clone();
+                std::thread::spawn(move || {
+                    // Writer: add a node
+                    {
+                        let mut write = s.write();
+                        write.graph.add_node(Node::new(
+                            NodeId::new(i),
+                            format!("thread_{}", i),
+                        ));
+                    }
+                    // Reader: count nodes
+                    {
+                        let read = s.read();
+                        let _ = read.graph.nodes.len();
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().expect("Thread should not panic");
+        }
+
+        let state = state.read();
+        assert_eq!(state.graph.nodes.len(), 10);
+    }
+
+    /// Test: UiState snapshot save/restore roundtrip.
+    #[test]
+    fn test_ui_state_serialization_roundtrip() {
+        use crate::util::spatial::Position;
+
+        let mut ui = UiState::default();
+        let id = NodeIdentifier::new("node".into(), Some("app".into()), None);
+        ui.persistent_positions.insert(id.clone(), Position::new(42.0, 99.0));
+        ui.persistent_uninteresting.insert(id.clone());
+        ui.persistent_custom_names.insert(id, "My Name".to_string());
+
+        let json = serde_json::to_string(&ui).expect("Serialization should not fail");
+        let restored: UiState = serde_json::from_str(&json).expect("Deserialization should not fail");
+
+        assert_eq!(ui.persistent_positions, restored.persistent_positions);
+        assert_eq!(ui.persistent_uninteresting, restored.persistent_uninteresting);
+        assert_eq!(ui.persistent_custom_names, restored.persistent_custom_names);
+    }
+
+    /// Test: add_port to nonexistent node should not panic.
+    #[test]
+    fn test_add_port_to_missing_node() {
+        let mut graph = GraphState::default();
+        let port = Port::new(PortId::new(10), NodeId::new(999), "orphan".into(), PortDirection::Input);
+        graph.add_port(port);
+        // Port is still stored, just not linked to any node
+        assert!(graph.get_port(&PortId::new(10)).is_some());
+    }
+
+    /// Test: remove nonexistent entities should not panic.
+    #[test]
+    fn test_remove_nonexistent_entities() {
+        let mut graph = GraphState::default();
+        assert!(graph.remove_node(&NodeId::new(999)).is_none());
+        assert!(graph.remove_port(&PortId::new(999)).is_none());
+        assert!(graph.remove_link(&LinkId::new(999)).is_none());
+    }
+
+    /// Test: link meters are cleaned up on link removal.
+    #[test]
+    fn test_link_meters_cleaned_on_removal() {
+        let mut graph = GraphState::default();
+        graph.add_node(Node::new(NodeId::new(1), "A".into()));
+        graph.add_node(Node::new(NodeId::new(2), "B".into()));
+        graph.add_link(Link::new(LinkId::new(1), PortId::new(1), PortId::new(2), NodeId::new(1), NodeId::new(2)));
+        assert!(graph.link_meters.contains_key(&LinkId::new(1)));
+        graph.remove_link(&LinkId::new(1));
+        assert!(!graph.link_meters.contains_key(&LinkId::new(1)));
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use crate::domain::graph::Node;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// Adding and removing random sequences of nodes should never panic
+        /// and leave consistent state.
+        #[test]
+        fn graph_add_remove_never_panics(
+            ops in proptest::collection::vec(
+                (1u32..100, proptest::bool::ANY),
+                1..50,
+            )
+        ) {
+            let mut graph = GraphState::default();
+            for (id, is_add) in &ops {
+                if *is_add {
+                    graph.add_node(Node::new(NodeId::new(*id), format!("N{}", id)));
+                } else {
+                    graph.remove_node(&NodeId::new(*id));
+                }
+            }
+            // Consistency: link meters should exist for every link
+            for link in graph.links.values() {
+                // Link meters should exist for every link
+                assert!(graph.link_meters.contains_key(&link.id));
+            }
+        }
+
+        /// Layer visibility toggle is always reversible.
+        #[test]
+        fn layer_visibility_toggle_reversible(
+            hw in proptest::bool::ANY,
+            pw in proptest::bool::ANY,
+            sm in proptest::bool::ANY,
+        ) {
+            use crate::domain::graph::NodeLayer;
+            let mut vis = LayerVisibility { hardware: hw, pipewire: pw, session: sm };
+            let original = vis;
+
+            vis.toggle(NodeLayer::Hardware);
+            vis.toggle(NodeLayer::Hardware);
+            assert_eq!(vis, original);
+        }
+    }
 }
