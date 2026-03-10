@@ -66,6 +66,68 @@ impl From<Position> for egui::Pos2 {
     }
 }
 
+/// A simple grid-based spatial index for fast proximity queries.
+///
+/// Divides 2D space into uniform cells. Looking up nearby positions
+/// only requires checking the query cell and its 8 neighbors,
+/// reducing collision detection from O(n) to O(1) amortized for sparse graphs.
+#[derive(Debug, Clone)]
+pub struct SpatialGrid {
+    cell_size: f32,
+    cells: std::collections::HashMap<(i32, i32), Vec<Position>>,
+}
+
+impl SpatialGrid {
+    /// Creates a new empty spatial grid with the given cell size.
+    /// Cell size should be at least as large as the minimum distance
+    /// between positions for correct neighbor detection.
+    pub fn new(cell_size: f32) -> Self {
+        Self {
+            cell_size: cell_size.max(1.0),
+            cells: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Builds a spatial grid from a set of positions.
+    pub fn from_positions(cell_size: f32, positions: impl IntoIterator<Item = Position>) -> Self {
+        let mut grid = Self::new(cell_size);
+        for pos in positions {
+            grid.insert(pos);
+        }
+        grid
+    }
+
+    fn cell_key(&self, pos: Position) -> (i32, i32) {
+        (
+            (pos.x / self.cell_size).floor() as i32,
+            (pos.y / self.cell_size).floor() as i32,
+        )
+    }
+
+    /// Inserts a position into the grid.
+    pub fn insert(&mut self, pos: Position) {
+        let key = self.cell_key(pos);
+        self.cells.entry(key).or_default().push(pos);
+    }
+
+    /// Returns true if there is any position within `min_distance` of `query`.
+    pub fn has_neighbor_within(&self, query: Position, min_distance: f32) -> bool {
+        let (cx, cy) = self.cell_key(query);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                if let Some(positions) = self.cells.get(&(cx + dx, cy + dy)) {
+                    for pos in positions {
+                        if query.distance_to(pos) < min_distance {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,5 +147,51 @@ mod tests {
 
         assert_eq!(offset.x, 15.0);
         assert_eq!(offset.y, 15.0);
+    }
+
+    #[test]
+    fn test_spatial_grid_empty() {
+        let grid = SpatialGrid::new(100.0);
+        assert!(!grid.has_neighbor_within(Position::new(50.0, 50.0), 10.0));
+    }
+
+    #[test]
+    fn test_spatial_grid_finds_nearby() {
+        let mut grid = SpatialGrid::new(100.0);
+        grid.insert(Position::new(50.0, 50.0));
+
+        assert!(grid.has_neighbor_within(Position::new(55.0, 55.0), 20.0));
+        assert!(!grid.has_neighbor_within(Position::new(500.0, 500.0), 20.0));
+    }
+
+    #[test]
+    fn test_spatial_grid_cross_cell_boundary() {
+        let mut grid = SpatialGrid::new(100.0);
+        // Position near cell boundary
+        grid.insert(Position::new(99.0, 99.0));
+
+        // Query from neighboring cell should still find it
+        assert!(grid.has_neighbor_within(Position::new(101.0, 101.0), 10.0));
+    }
+
+    #[test]
+    fn test_spatial_grid_from_positions() {
+        let positions = vec![
+            Position::new(0.0, 0.0),
+            Position::new(100.0, 100.0),
+            Position::new(200.0, 200.0),
+        ];
+        let grid = SpatialGrid::from_positions(150.0, positions);
+
+        assert!(grid.has_neighbor_within(Position::new(5.0, 5.0), 20.0));
+        assert!(grid.has_neighbor_within(Position::new(105.0, 105.0), 20.0));
+        assert!(!grid.has_neighbor_within(Position::new(500.0, 500.0), 20.0));
+    }
+
+    #[test]
+    fn test_spatial_grid_minimum_cell_size() {
+        // Cell size should be clamped to at least 1.0
+        let grid = SpatialGrid::new(0.0);
+        assert!(grid.cell_size >= 1.0);
     }
 }

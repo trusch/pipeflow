@@ -156,12 +156,21 @@ impl SmartLayout {
     }
 
     /// Finds a free spot near a target position.
+    /// Uses a spatial grid for O(1) amortized collision detection on large graphs.
     fn find_free_spot_near(
         &self,
         target: Position,
         media_class: Option<&MediaClass>,
         current_positions: &HashMap<NodeId, Position>,
     ) -> Position {
+        let min_distance = self.min_distance();
+
+        // Build spatial grid for fast proximity queries
+        let grid = crate::util::spatial::SpatialGrid::from_positions(
+            min_distance,
+            current_positions.values().copied(),
+        );
+
         // Adjust x based on media class
         let adjusted_x = if let Some(mc) = media_class {
             match mc.layout_column() {
@@ -176,7 +185,7 @@ impl SmartLayout {
         let target = Position::new(adjusted_x, target.y);
 
         // Try the target position first
-        if self.is_position_free(target, current_positions) {
+        if !grid.has_neighbor_within(target, min_distance) {
             return target;
         }
 
@@ -186,24 +195,24 @@ impl SmartLayout {
 
             // Try below first (most natural for new nodes)
             let below = Position::new(target.x, target.y + offset);
-            if self.is_position_free(below, current_positions) {
+            if !grid.has_neighbor_within(below, min_distance) {
                 return below;
             }
 
             // Then above
             let above = Position::new(target.x, target.y - offset);
-            if self.is_position_free(above, current_positions) {
+            if !grid.has_neighbor_within(above, min_distance) {
                 return above;
             }
 
             // Then to the sides
             let right = Position::new(target.x + offset, target.y);
-            if self.is_position_free(right, current_positions) {
+            if !grid.has_neighbor_within(right, min_distance) {
                 return right;
             }
 
             let left = Position::new(target.x - offset, target.y);
-            if self.is_position_free(left, current_positions) {
+            if !grid.has_neighbor_within(left, min_distance) {
                 return left;
             }
         }
@@ -212,10 +221,16 @@ impl SmartLayout {
         Position::new(target.x, target.y + self.config.node_spacing_y)
     }
 
+    /// Returns the minimum distance between nodes for layout.
+    fn min_distance(&self) -> f32 {
+        (self.config.node_width.powi(2) + self.config.node_height.powi(2)).sqrt() * 0.6
+    }
+
     /// Checks if a position is free (no overlapping nodes).
+    /// Uses O(n) scan — for batch operations, prefer building a SpatialGrid.
+    #[cfg(test)]
     fn is_position_free(&self, pos: Position, current_positions: &HashMap<NodeId, Position>) -> bool {
-        let min_distance =
-            (self.config.node_width.powi(2) + self.config.node_height.powi(2)).sqrt() * 0.6;
+        let min_distance = self.min_distance();
 
         for existing in current_positions.values() {
             if pos.distance_to(existing) < min_distance {
