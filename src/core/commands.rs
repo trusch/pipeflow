@@ -11,9 +11,11 @@ use thiserror::Error;
 /// Errors that can occur when executing commands.
 #[derive(Debug, Error)]
 pub enum CommandError {
+    /// Command was blocked by the safety controller.
     #[error("Command blocked by safety mode: {0}")]
     SafetyBlocked(String),
 
+    /// The command was invalid or could not be sent.
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
 }
@@ -27,26 +29,43 @@ pub enum AppCommand {
     // Link management
     /// Create a link between two ports
     CreateLink {
+        /// Source port ID.
         output_port: PortId,
+        /// Destination port ID.
         input_port: PortId,
     },
     /// Remove an existing link
     RemoveLink(LinkId),
     /// Toggle link state (enable/disable)
-    ToggleLink { link_id: LinkId, active: bool },
+    ToggleLink {
+        /// Link to toggle.
+        link_id: LinkId,
+        /// New active state.
+        active: bool,
+    },
 
     // Audio control
     /// Set volume for a node
     SetVolume {
+        /// Target node.
         node_id: NodeId,
+        /// New volume settings.
         volume: VolumeControl,
     },
     /// Set mute state for a node
-    SetMute { node_id: NodeId, muted: bool },
+    SetMute {
+        /// Target node.
+        node_id: NodeId,
+        /// Whether to mute.
+        muted: bool,
+    },
     /// Set volume for a specific channel
     SetChannelVolume {
+        /// Target node.
         node_id: NodeId,
+        /// Channel index.
         channel: usize,
+        /// New volume level.
         volume: f32,
     },
 

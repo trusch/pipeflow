@@ -63,9 +63,12 @@ impl Default for UiConfig {
 /// Theme preference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ThemePreference {
+    /// Follow system theme.
     #[default]
     System,
+    /// Light theme.
     Light,
+    /// Dark theme.
     Dark,
 }
 
@@ -100,8 +103,10 @@ impl Default for MeterConfig {
 /// Meter scale type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum MeterScale {
+    /// Logarithmic (dB) scale — better for audio.
     #[default]
     Logarithmic,
+    /// Linear scale.
     Linear,
 }
 

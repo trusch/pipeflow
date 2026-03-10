@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 /// A 2D position in the graph canvas.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Position {
+    /// Horizontal coordinate in canvas space.
     pub x: f32,
+    /// Vertical coordinate in canvas space.
     pub y: f32,
 }
 

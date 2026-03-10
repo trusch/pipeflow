@@ -130,8 +130,11 @@ impl NodeGroup {
 /// Color for a group (for visual distinction).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroupColor {
+    /// Red component (0-255).
     pub r: u8,
+    /// Green component (0-255).
     pub g: u8,
+    /// Blue component (0-255).
     pub b: u8,
 }
 
