@@ -53,7 +53,7 @@ impl Default for UiConfig {
             show_grid: true,
             grid_spacing: 20.0,
             snap_to_grid: false,
-            show_minimap: false,
+            show_minimap: true,
             node_width: 200.0,
             port_spacing: 24.0,
         }

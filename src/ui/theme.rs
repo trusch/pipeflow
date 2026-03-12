@@ -88,6 +88,64 @@ impl Theme {
         }
     }
 
+    /// Creates the light theme.
+    pub fn light() -> Self {
+        Self {
+            background: BackgroundColors {
+                primary: Color32::from_rgb(240, 240, 245),
+                secondary: Color32::from_rgb(230, 230, 238),
+                grid: Color32::from_rgb(215, 215, 225),
+                selection: Color32::from_rgba_unmultiplied(60, 120, 220, 40),
+            },
+            node: NodeColors {
+                background: Color32::from_rgb(252, 252, 255),
+                background_selected: Color32::from_rgb(235, 240, 255),
+                border: Color32::from_rgb(180, 180, 195),
+                border_selected: Color32::from_rgb(60, 120, 220),
+                header_source: Color32::from_rgb(110, 175, 110),
+                header_sink: Color32::from_rgb(185, 105, 105),
+                header_stream: Color32::from_rgb(100, 130, 180),
+                header_other: Color32::from_rgb(140, 140, 155),
+            },
+            port: PortColors {
+                audio_input: Color32::from_rgb(80, 160, 80),
+                audio_output: Color32::from_rgb(170, 80, 80),
+                midi_input: Color32::from_rgb(80, 80, 170),
+                midi_output: Color32::from_rgb(160, 80, 160),
+                video_input: Color32::from_rgb(160, 160, 70),
+                video_output: Color32::from_rgb(170, 130, 70),
+                control: Color32::from_rgb(120, 120, 120),
+                monitor: Color32::from_rgb(80, 130, 160),
+            },
+            wire: WireColors {
+                audio: Color32::from_rgb(70, 170, 70),
+                audio_hover: Color32::from_rgb(50, 200, 50),
+                midi: Color32::from_rgb(70, 70, 170),
+                midi_hover: Color32::from_rgb(80, 80, 220),
+                video: Color32::from_rgb(170, 170, 70),
+                video_hover: Color32::from_rgb(200, 200, 50),
+                inactive: Color32::from_rgb(170, 170, 180),
+                creating: Color32::from_rgb(100, 100, 110),
+            },
+            meter: MeterColors {
+                background: Color32::from_rgb(210, 210, 220),
+                low: Color32::from_rgb(50, 170, 50),
+                mid: Color32::from_rgb(190, 190, 40),
+                high: Color32::from_rgb(200, 50, 50),
+                peak_hold: Color32::from_rgb(40, 40, 40),
+            },
+            text: TextColors {
+                primary: Color32::from_rgb(30, 30, 40),
+                secondary: Color32::from_rgb(80, 80, 95),
+                muted: Color32::from_rgb(140, 140, 155),
+                accent: Color32::from_rgb(40, 100, 200),
+                warning: Color32::from_rgb(180, 130, 30),
+                error: Color32::from_rgb(200, 50, 50),
+            },
+            sizes: Sizes::default(),
+        }
+    }
+
     /// Returns the appropriate header color for a media class.
     pub fn header_color_for_media_class(
         &self,
@@ -275,6 +333,21 @@ mod tests {
         assert!(dark.background.primary.r() < 100);
         assert!(dark.background.primary.g() < 100);
         assert!(dark.background.primary.b() < 100);
+    }
+
+    #[test]
+    fn test_light_theme_creation() {
+        let light = Theme::light();
+
+        // Light theme should have light backgrounds (high RGB values)
+        assert!(light.background.primary.r() > 200);
+        assert!(light.background.primary.g() > 200);
+        assert!(light.background.primary.b() > 200);
+
+        // Light theme text should be dark
+        assert!(light.text.primary.r() < 100);
+        assert!(light.text.primary.g() < 100);
+        assert!(light.text.primary.b() < 100);
     }
 
     #[test]

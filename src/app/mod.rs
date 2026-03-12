@@ -29,6 +29,7 @@ use crate::ui::node_panel::NodePanel;
 use crate::ui::rules::RulesPanel;
 use crate::ui::settings::SettingsPanel;
 use crate::ui::sidebar::{SidebarState, MAX_WIDTH, MIN_WIDTH};
+use crate::core::config::ThemePreference;
 use crate::ui::theme::Theme;
 use crate::ui::toolbar::Toolbar;
 use crate::util::id::{NodeId, NodeIdentifier};
@@ -180,6 +181,9 @@ impl AppComponents {
 
 impl eframe::App for PipeflowApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // --- Theme Sync ---
+        self.sync_theme(ctx);
+
         // --- Event Processing ---
         self.process_pw_events();
         self.process_pending_rule_connections();
@@ -250,6 +254,32 @@ impl eframe::App for PipeflowApp {
 
 // --- Private implementation methods for update() ---
 impl PipeflowApp {
+    /// Syncs the visual theme from config, resolving System preference.
+    fn sync_theme(&mut self, ctx: &egui::Context) {
+        let use_dark = match self.config.ui.theme {
+            ThemePreference::Dark => true,
+            ThemePreference::Light => false,
+            ThemePreference::System => {
+                // Use egui's system theme detection
+                ctx.style().visuals.dark_mode
+            }
+        };
+
+        // Also update egui's own visuals to match
+        let new_theme = if use_dark {
+            ctx.set_visuals(egui::Visuals::dark());
+            Theme::dark()
+        } else {
+            ctx.set_visuals(egui::Visuals::light());
+            Theme::light()
+        };
+
+        // Only replace if the theme preference changed (compare background color as proxy)
+        if self.components.theme.background.primary != new_theme.background.primary {
+            self.components.theme = new_theme;
+        }
+    }
+
     /// Updates position animations and requests repaint if needed.
     fn update_animations(&mut self, ctx: &egui::Context) {
         let mut state = self.state.write();
@@ -978,6 +1008,8 @@ impl PipeflowApp {
                 &state.ui.filters,
                 &state.graph.ports,
                 &self.components.theme,
+                &state.ui.groups,
+                self.config.ui.show_minimap,
             );
             drop(state);
 

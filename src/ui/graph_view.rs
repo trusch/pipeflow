@@ -133,6 +133,7 @@ fn measure_text_width(text: &str, font_id: &egui::FontId, fonts: &mut egui::epai
 }
 
 use crate::domain::graph::{Link, Node, Port, PortDirection};
+use crate::domain::groups::GroupManager;
 use crate::ui::theme::Theme;
 use crate::util::id::{LinkId, NodeId, PortId};
 use crate::util::spatial::Position;
@@ -177,6 +178,10 @@ pub struct GraphView {
     box_selection_start: Option<Pos2>,
     /// Context menu target (locked when menu opens)
     context_menu_target: ContextMenuTarget,
+    /// Per-node opacity for fade-in animation (0.0 = invisible, 1.0 = fully visible)
+    node_alphas: HashMap<NodeId, f32>,
+    /// Whether the minimap is currently being dragged
+    minimap_dragging: bool,
 }
 
 /// State of a connection being dragged.
@@ -201,6 +206,8 @@ impl Default for GraphView {
             hovered_link: None,
             box_selection_start: None,
             context_menu_target: ContextMenuTarget::None,
+            node_alphas: HashMap::new(),
+            minimap_dragging: false,
         }
     }
 }
@@ -285,6 +292,8 @@ impl GraphView {
         filters: &FilterSet,
         ports: &HashMap<PortId, Port>,
         theme: &Theme,
+        groups: &GroupManager,
+        show_minimap: bool,
     ) -> GraphViewResponse {
         let mut response = GraphViewResponse::default();
 
@@ -351,6 +360,43 @@ impl GraphView {
 
         // Transform for zoom and pan
         let transform = GraphTransform::new(rect.center(), self.zoom, self.pan);
+
+        // Update node fade-in alphas
+        {
+            let current_node_ids: HashSet<NodeId> = graph.nodes.keys().copied().collect();
+
+            // Insert new nodes at alpha 0.0
+            for &node_id in &current_node_ids {
+                self.node_alphas.entry(node_id).or_insert(0.0);
+            }
+
+            // Lerp all existing entries toward 1.0 for present nodes, toward 0.0 for absent
+            let mut to_remove = Vec::new();
+            for (node_id, alpha) in self.node_alphas.iter_mut() {
+                if current_node_ids.contains(node_id) {
+                    *alpha += (1.0 - *alpha) * 0.15;
+                    if *alpha > 0.99 {
+                        *alpha = 1.0;
+                    }
+                } else {
+                    *alpha -= *alpha * 0.15;
+                    if *alpha < 0.01 {
+                        to_remove.push(*node_id);
+                    }
+                }
+            }
+            for id in to_remove {
+                self.node_alphas.remove(&id);
+            }
+
+            // Request repaint while any node is animating
+            if self.node_alphas.values().any(|&a| a < 1.0) {
+                ui.ctx().request_repaint();
+            }
+        }
+
+        // Draw group boundaries (before nodes, after grid)
+        self.draw_group_boundaries(ui, groups, node_positions, &transform, theme);
 
         // Reset hovered link state before drawing links
         self.hovered_link = None;
@@ -599,7 +645,226 @@ impl GraphView {
             self.show_context_menu(ui, graph, uninteresting_nodes, &mut response);
         });
 
+        // --- Minimap Overlay ---
+        if show_minimap {
+            self.draw_minimap(ui, rect, graph, node_positions, hide_uninteresting, uninteresting_nodes, layer_visibility, filters, ports, theme, &transform);
+        }
+
         response
+    }
+
+    /// Draws a minimap overlay in the bottom-right corner of the graph view.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_minimap(
+        &mut self,
+        ui: &mut Ui,
+        graph_rect: Rect,
+        graph: &GraphState,
+        node_positions: &HashMap<NodeId, Position>,
+        hide_uninteresting: bool,
+        uninteresting_nodes: &HashSet<NodeId>,
+        layer_visibility: &LayerVisibility,
+        filters: &FilterSet,
+        ports: &HashMap<PortId, Port>,
+        theme: &Theme,
+        transform: &GraphTransform,
+    ) {
+        let minimap_w = 200.0_f32;
+        let minimap_h = 150.0_f32;
+        let margin = 12.0_f32;
+
+        let minimap_rect = Rect::from_min_size(
+            Pos2::new(
+                graph_rect.right() - minimap_w - margin,
+                graph_rect.bottom() - minimap_h - margin,
+            ),
+            Vec2::new(minimap_w, minimap_h),
+        );
+
+        let painter = ui.painter();
+
+        // Semi-transparent background
+        painter.rect_filled(
+            minimap_rect,
+            4.0,
+            Color32::from_rgba_unmultiplied(20, 20, 25, 200),
+        );
+        painter.rect_stroke(
+            minimap_rect,
+            4.0,
+            Stroke::new(1.0, Color32::from_rgba_unmultiplied(80, 80, 90, 180)),
+            egui::StrokeKind::Outside,
+        );
+
+        // Collect visible node positions and their bounding box in graph space
+        let mut min_x = f32::MAX;
+        let mut min_y = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut max_y = f32::MIN;
+
+        struct MiniNode {
+            x: f32,
+            y: f32,
+            w: f32,
+            h: f32,
+            color: Color32,
+        }
+
+        let mut mini_nodes: Vec<MiniNode> = Vec::new();
+
+        for node in graph.nodes.values() {
+            let is_uninteresting = uninteresting_nodes.contains(&node.id);
+            if hide_uninteresting && is_uninteresting {
+                continue;
+            }
+            if !layer_visibility.is_visible(node.layer) {
+                continue;
+            }
+            if !filters.is_empty() && !filters.matches_with_ports(node, ports) {
+                continue;
+            }
+
+            let pos = node_positions
+                .get(&node.id)
+                .copied()
+                .unwrap_or(Position::zero());
+
+            let is_meter = is_metering_node(&node.name);
+            let node_width = if is_meter {
+                theme.sizes.node_width * 0.55
+            } else {
+                theme.sizes.node_width
+            };
+
+            let node_ports = graph.ports_for_node(&node.id);
+            let input_count = node_ports.iter().filter(|p| p.direction == PortDirection::Input).count();
+            let output_count = node_ports.iter().filter(|p| p.direction == PortDirection::Output).count();
+            let max_ports = input_count.max(output_count);
+            let meter_data = graph.meters.get(&node.id);
+            let has_meter = meter_data.map(|m| m.max_peak() > 0.0).unwrap_or(false);
+            let meter_height = if has_meter { 8.0 } else { 0.0 };
+            let node_height = theme.sizes.node_header_height
+                + meter_height
+                + (max_ports as f32 * theme.sizes.port_height)
+                + 8.0;
+
+            min_x = min_x.min(pos.x);
+            min_y = min_y.min(pos.y);
+            max_x = max_x.max(pos.x + node_width);
+            max_y = max_y.max(pos.y + node_height);
+
+            let header_color = theme.header_color_for_media_class(node.media_class.as_ref());
+
+            mini_nodes.push(MiniNode {
+                x: pos.x,
+                y: pos.y,
+                w: node_width,
+                h: node_height,
+                color: header_color,
+            });
+        }
+
+        if mini_nodes.is_empty() {
+            return;
+        }
+
+        // Add padding around bounding box
+        let padding = 100.0;
+        min_x -= padding;
+        min_y -= padding;
+        max_x += padding;
+        max_y += padding;
+
+        let world_w = max_x - min_x;
+        let world_h = max_y - min_y;
+
+        if world_w <= 0.0 || world_h <= 0.0 {
+            return;
+        }
+
+        // Determine scale to fit the world into the minimap (with inner margin)
+        let inner_margin = 6.0;
+        let inner_w = minimap_w - inner_margin * 2.0;
+        let inner_h = minimap_h - inner_margin * 2.0;
+        let scale = (inner_w / world_w).min(inner_h / world_h);
+
+        // Offset to center the content in the minimap
+        let scaled_w = world_w * scale;
+        let scaled_h = world_h * scale;
+        let offset_x = minimap_rect.min.x + inner_margin + (inner_w - scaled_w) * 0.5;
+        let offset_y = minimap_rect.min.y + inner_margin + (inner_h - scaled_h) * 0.5;
+
+        // Helper: graph coords -> minimap coords
+        let to_minimap = |gx: f32, gy: f32| -> Pos2 {
+            Pos2::new(
+                offset_x + (gx - min_x) * scale,
+                offset_y + (gy - min_y) * scale,
+            )
+        };
+
+        // Draw mini nodes
+        for mn in &mini_nodes {
+            let tl = to_minimap(mn.x, mn.y);
+            let node_rect = Rect::from_min_size(
+                tl,
+                Vec2::new((mn.w * scale).max(2.0), (mn.h * scale).max(2.0)),
+            );
+            // Clip to minimap bounds
+            let clipped = node_rect.intersect(minimap_rect);
+            if clipped.width() > 0.0 && clipped.height() > 0.0 {
+                painter.rect_filled(clipped, 1.0, mn.color);
+            }
+        }
+
+        // Draw viewport indicator
+        // The visible screen rectangle in graph coordinates
+        let view_tl = transform.screen_to_graph(graph_rect.left_top());
+        let view_br = transform.screen_to_graph(graph_rect.right_bottom());
+
+        let vp_tl = to_minimap(view_tl.x, view_tl.y);
+        let vp_br = to_minimap(view_br.x, view_br.y);
+        let viewport_rect = Rect::from_two_pos(vp_tl, vp_br).intersect(minimap_rect);
+
+        if viewport_rect.width() > 0.0 && viewport_rect.height() > 0.0 {
+            painter.rect_stroke(
+                viewport_rect,
+                1.0,
+                Stroke::new(1.5, Color32::from_rgba_unmultiplied(200, 200, 255, 180)),
+                egui::StrokeKind::Outside,
+            );
+            painter.rect_filled(
+                viewport_rect,
+                1.0,
+                Color32::from_rgba_unmultiplied(100, 150, 255, 25),
+            );
+        }
+
+        // Handle click/drag on minimap to pan the view
+        let minimap_response = ui.interact(
+            minimap_rect,
+            ui.id().with("minimap"),
+            Sense::click_and_drag(),
+        );
+
+        if minimap_response.clicked() || minimap_response.dragged() {
+            if let Some(pointer_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                if minimap_rect.contains(pointer_pos) {
+                    // Convert minimap position back to graph coordinates
+                    let graph_x = min_x + (pointer_pos.x - offset_x) / scale;
+                    let graph_y = min_y + (pointer_pos.y - offset_y) / scale;
+
+                    // Set pan so this graph point is at the center of the view
+                    self.pan.x = -graph_x * self.zoom;
+                    self.pan.y = -graph_y * self.zoom;
+
+                    self.minimap_dragging = true;
+                }
+            }
+        }
+
+        if minimap_response.drag_stopped() {
+            self.minimap_dragging = false;
+        }
     }
 
     /// Shows the context menu for the graph (links and background only - nodes have their own menu).
@@ -684,6 +949,99 @@ impl GraphView {
         }
     }
 
+    /// Draws group boundary rectangles on the canvas.
+    fn draw_group_boundaries(
+        &self,
+        ui: &mut Ui,
+        groups: &GroupManager,
+        node_positions: &HashMap<NodeId, Position>,
+        transform: &GraphTransform,
+        theme: &Theme,
+    ) {
+        let painter = ui.painter();
+        let padding = 20.0; // graph-space padding around members
+
+        for group in &groups.groups {
+            if group.members.is_empty() {
+                continue;
+            }
+
+            // Compute bounding box of all member node positions in graph space
+            let mut min_x = f32::MAX;
+            let mut min_y = f32::MAX;
+            let mut max_x = f32::MIN;
+            let mut max_y = f32::MIN;
+            let mut found_any = false;
+
+            for member_id in &group.members {
+                if let Some(pos) = node_positions.get(member_id) {
+                    found_any = true;
+                    min_x = min_x.min(pos.x);
+                    min_y = min_y.min(pos.y);
+                    // Estimate node extent: use default node width and a rough height
+                    max_x = max_x.max(pos.x + theme.sizes.node_width);
+                    max_y = max_y.max(pos.y + theme.sizes.node_header_height + 60.0);
+                }
+            }
+
+            if !found_any {
+                continue;
+            }
+
+            // Add padding in graph space
+            min_x -= padding;
+            min_y -= padding;
+            max_x += padding;
+            max_y += padding;
+
+            // Convert to screen space
+            let screen_min = transform.graph_to_screen(Pos2::new(min_x, min_y));
+            let screen_max = transform.graph_to_screen(Pos2::new(max_x, max_y));
+            let group_rect = Rect::from_min_max(screen_min, screen_max);
+
+            let base_color = group.color.to_color32();
+
+            // Fill with very low alpha
+            let fill_color = Color32::from_rgba_unmultiplied(
+                base_color.r(),
+                base_color.g(),
+                base_color.b(),
+                25,
+            );
+            painter.rect_filled(group_rect, 8.0, fill_color);
+
+            // Border stroke at medium alpha
+            let border_color = Color32::from_rgba_unmultiplied(
+                base_color.r(),
+                base_color.g(),
+                base_color.b(),
+                90,
+            );
+            painter.rect_stroke(
+                group_rect,
+                8.0,
+                Stroke::new(1.5, border_color),
+                egui::StrokeKind::Outside,
+            );
+
+            // Group name label at top-left
+            let label_color = Color32::from_rgba_unmultiplied(
+                base_color.r(),
+                base_color.g(),
+                base_color.b(),
+                200,
+            );
+            let font_size = 11.0 * self.zoom.max(0.4);
+            painter.text(
+                Pos2::new(screen_min.x + 6.0, screen_min.y + 4.0),
+                egui::Align2::LEFT_TOP,
+                &group.name,
+                egui::FontId::proportional(font_size),
+                label_color,
+            );
+        }
+    }
+
     /// Draws a node.
     #[allow(clippy::too_many_arguments)]
     fn draw_node(
@@ -755,18 +1113,24 @@ impl GraphView {
             LodLevel::Full // Everything
         };
 
-        // Helper to dim colors for uninteresting nodes
+        // Get node fade-in alpha
+        let node_alpha = self.node_alphas.get(&node.id).copied().unwrap_or(1.0);
+
+        // Helper to dim colors for uninteresting nodes and apply fade-in alpha
         let dim_color = |color: Color32| -> Color32 {
-            if is_uninteresting {
+            let (r, g, b, a) = if is_uninteresting {
                 // Reduce saturation and brightness for greyed out appearance
                 let r = (color.r() as f32 * 0.4 + 40.0) as u8;
                 let g = (color.g() as f32 * 0.4 + 40.0) as u8;
                 let b = (color.b() as f32 * 0.4 + 40.0) as u8;
                 let a = (color.a() as f32 * 0.6) as u8;
-                Color32::from_rgba_unmultiplied(r, g, b, a)
+                (r, g, b, a)
             } else {
-                color
-            }
+                (color.r(), color.g(), color.b(), color.a())
+            };
+            // Apply fade-in alpha
+            let a = (a as f32 * node_alpha) as u8;
+            Color32::from_rgba_unmultiplied(r, g, b, a)
         };
 
         // Draw subtle drop shadow (only at higher LOD levels and for non-uninteresting nodes)
@@ -777,7 +1141,7 @@ impl GraphView {
                 node_rect.size(),
             );
             // Soft shadow with multiple layers for smooth appearance
-            let shadow_alpha = if is_selected { 60 } else { 40 };
+            let shadow_alpha = ((if is_selected { 60.0 } else { 40.0 }) * node_alpha) as u8;
             let outer_rounding = theme.sizes.node_rounding + 2.0;
             painter.rect_filled(
                 shadow_rect.expand(2.0 * self.zoom),
@@ -795,7 +1159,7 @@ impl GraphView {
         if is_selected && !is_uninteresting {
             let time = ui.input(|i| i.time);
             let pulse = ((time * 2.0).sin() * 0.3 + 0.7) as f32; // Gentle pulse between 0.4 and 1.0
-            let glow_alpha = (80.0 * pulse) as u8;
+            let glow_alpha = (80.0 * pulse * node_alpha) as u8;
             let glow_expand = 4.0 * self.zoom * pulse;
             let glow_rounding = theme.sizes.node_rounding + glow_expand;
 
@@ -954,6 +1318,7 @@ impl GraphView {
                 node_width,
                 theme,
                 response,
+                node_alpha,
             );
         }
 
@@ -971,6 +1336,7 @@ impl GraphView {
                 node_width,
                 theme,
                 response,
+                node_alpha,
             );
         }
 
@@ -1116,6 +1482,7 @@ impl GraphView {
         node_width: f32,
         theme: &Theme,
         response: &mut GraphViewResponse,
+        node_alpha: f32,
     ) {
         let painter = ui.painter();
 
@@ -1126,14 +1493,20 @@ impl GraphView {
         };
         let circle_center = Pos2::new(circle_x, pos.y + theme.sizes.port_height * self.zoom * 0.5);
 
-        // Port color based on type
-        let color = theme.port_color(
+        // Port color based on type, with node alpha applied
+        let base_color = theme.port_color(
             port.direction,
             true, // Assume audio for now
             false,
             false,
             port.is_control,
             port.is_monitor,
+        );
+        let color = Color32::from_rgba_unmultiplied(
+            base_color.r(),
+            base_color.g(),
+            base_color.b(),
+            (base_color.a() as f32 * node_alpha) as u8,
         );
 
         // Draw port circle
@@ -1168,12 +1541,18 @@ impl GraphView {
                 truncate_text_measured(port.display_name(), max_port_text_width, &font_id, fonts)
             });
 
+            let port_text_color = Color32::from_rgba_unmultiplied(
+                theme.text.secondary.r(),
+                theme.text.secondary.g(),
+                theme.text.secondary.b(),
+                (theme.text.secondary.a() as f32 * node_alpha) as u8,
+            );
             painter.text(
                 Pos2::new(text_x, circle_center.y),
                 text_align,
                 truncated_port_name,
                 font_id,
-                theme.text.secondary,
+                port_text_color,
             );
         }
 
@@ -1727,6 +2106,13 @@ impl GraphTransform {
         Pos2::new(
             self.center.x + (pos.x * self.zoom) + self.pan.x,
             self.center.y + (pos.y * self.zoom) + self.pan.y,
+        )
+    }
+
+    fn screen_to_graph(&self, pos: Pos2) -> Pos2 {
+        Pos2::new(
+            (pos.x - self.center.x - self.pan.x) / self.zoom,
+            (pos.y - self.center.y - self.pan.y) / self.zoom,
         )
     }
 }
