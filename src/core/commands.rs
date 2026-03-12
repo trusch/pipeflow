@@ -183,6 +183,8 @@ pub enum CommandAction {
     Ui(UiCommand),
     /// Custom action (identified by string)
     Custom(String),
+    /// Jump to a specific node (pan + select)
+    GoToNode(NodeId),
 }
 
 impl CommandRegistry {
@@ -306,12 +308,50 @@ impl CommandRegistry {
             action: CommandAction::Custom("toggle_right_sidebar".to_string()),
         });
 
+        // Undo/Redo
+        self.register(CommandEntry {
+            name: "Undo".to_string(),
+            description: "Undo the last action".to_string(),
+            shortcut: Some("Ctrl+Z".to_string()),
+            action: CommandAction::Custom("undo".to_string()),
+        });
+
+        self.register(CommandEntry {
+            name: "Redo".to_string(),
+            description: "Redo the last undone action".to_string(),
+            shortcut: Some("Ctrl+Shift+Z".to_string()),
+            action: CommandAction::Custom("redo".to_string()),
+        });
+
+        // Snapshot commands
+        self.register(CommandEntry {
+            name: "Save Snapshot".to_string(),
+            description: "Save current routing as a snapshot".to_string(),
+            shortcut: None,
+            action: CommandAction::Custom("save_snapshot".to_string()),
+        });
+
         // Group commands
         self.register(CommandEntry {
             name: "Create Group".to_string(),
             description: "Create a group from selected nodes".to_string(),
             shortcut: Some("Ctrl+G".to_string()),
             action: CommandAction::Ui(UiCommand::CreateGroupFromSelection(None)),
+        });
+
+        // Layout commands
+        self.register(CommandEntry {
+            name: "Auto-Layout".to_string(),
+            description: "Automatically arrange nodes for clarity".to_string(),
+            shortcut: Some("Ctrl+L".to_string()),
+            action: CommandAction::Custom("auto_layout".to_string()),
+        });
+
+        self.register(CommandEntry {
+            name: "Auto-Layout Selected".to_string(),
+            description: "Arrange only selected nodes".to_string(),
+            shortcut: None,
+            action: CommandAction::Custom("auto_layout_selected".to_string()),
         });
     }
 

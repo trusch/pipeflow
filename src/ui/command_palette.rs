@@ -3,6 +3,7 @@
 //! Provides fuzzy search for commands and actions.
 
 use crate::core::commands::{CommandAction, CommandEntry, CommandRegistry};
+use crate::util::id::NodeId;
 use egui::{Key, Ui};
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
@@ -79,6 +80,7 @@ impl CommandPalette {
         &mut self,
         ctx: &egui::Context,
         registry: &CommandRegistry,
+        node_entries: &[(NodeId, String)],
     ) -> Option<CommandAction> {
         if !self.open {
             return None;
@@ -86,8 +88,9 @@ impl CommandPalette {
 
         let mut result = None;
 
-        // Get filtered results
-        let results = self.filter_commands(registry);
+        // Get filtered results (commands + node entries)
+        let node_command_entries = self.build_node_entries(node_entries);
+        let results = self.filter_commands_with_nodes(registry, &node_command_entries);
 
         egui::Window::new("Command Palette")
             .title_bar(false)
@@ -192,38 +195,55 @@ impl CommandPalette {
         result
     }
 
-    /// Filters commands based on search text.
-    /// When search is empty, commands are sorted by usage history (most recent first).
-    /// When searching, fuzzy match score is combined with history boost.
-    fn filter_commands<'a>(&self, registry: &'a CommandRegistry) -> Vec<&'a CommandEntry> {
+    /// Builds CommandEntry items for node search results.
+    fn build_node_entries(&self, nodes: &[(NodeId, String)]) -> Vec<CommandEntry> {
+        nodes
+            .iter()
+            .map(|(id, name)| CommandEntry {
+                name: format!("\u{2192} {}", name), // → prefix for visual distinction
+                description: format!("Jump to node"),
+                shortcut: None,
+                action: CommandAction::GoToNode(*id),
+            })
+            .collect()
+    }
+
+    /// Filters commands and node entries based on search text.
+    /// When search is empty, only commands are shown (sorted by history).
+    /// When searching, both commands and node entries are fuzzy-matched.
+    fn filter_commands_with_nodes<'a>(
+        &self,
+        registry: &'a CommandRegistry,
+        node_entries: &'a [CommandEntry],
+    ) -> Vec<&'a CommandEntry> {
         if self.search.is_empty() {
-            // Sort by history: used commands first (most recent at top), then alphabetical
+            // No search: show only commands, sorted by history
             let mut commands: Vec<_> = registry.all().iter().collect();
             commands.sort_by(|a, b| {
                 let a_rank = self.history_rank(&a.name);
                 let b_rank = self.history_rank(&b.name);
                 match (a_rank, b_rank) {
-                    (Some(a_r), Some(b_r)) => a_r.cmp(&b_r), // Both in history: by recency
-                    (Some(_), None) => std::cmp::Ordering::Less, // a in history, b not: a first
-                    (None, Some(_)) => std::cmp::Ordering::Greater, // b in history, a not: b first
-                    (None, None) => a.name.cmp(&b.name), // Neither in history: alphabetical
+                    (Some(a_r), Some(b_r)) => a_r.cmp(&b_r),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => a.name.cmp(&b.name),
                 }
             });
             return commands;
         }
 
-        let mut scored: Vec<_> = registry
-            .all()
-            .iter()
+        // Fuzzy match against both commands and node entries
+        let all_entries = registry.all().iter().chain(node_entries.iter());
+
+        let mut scored: Vec<_> = all_entries
             .filter_map(|entry| {
                 let score = self
                     .matcher
                     .fuzzy_match(&entry.name, &self.search)
                     .or_else(|| self.matcher.fuzzy_match(&entry.description, &self.search));
                 score.map(|s| {
-                    // Boost score for recently used commands
                     let history_boost = match self.history_rank(&entry.name) {
-                        Some(rank) => 50 - (rank as i64).min(50), // Recent = higher boost
+                        Some(rank) => 50 - (rank as i64).min(50),
                         None => 0,
                     };
                     (entry, s + history_boost)
@@ -231,10 +251,15 @@ impl CommandPalette {
             })
             .collect();
 
-        // Sort by score (highest first)
         scored.sort_by(|a, b| b.1.cmp(&a.1));
-
         scored.into_iter().map(|(entry, _)| entry).collect()
+    }
+
+    /// Filters commands based on search text (without node entries).
+    /// When search is empty, commands are sorted by usage history (most recent first).
+    /// When searching, fuzzy match score is combined with history boost.
+    fn filter_commands<'a>(&self, registry: &'a CommandRegistry) -> Vec<&'a CommandEntry> {
+        self.filter_commands_with_nodes(registry, &[])
     }
 
     /// Draws a command entry with improved typography.

@@ -123,6 +123,10 @@ impl Toolbar {
             response.open_search = true;
         }
 
+        if ui.button(egui_phosphor::regular::GRAPH).on_hover_text("Auto-Layout (Ctrl+L)").clicked() {
+            response.auto_layout = true;
+        }
+
         ui.separator();
 
         // Toggle hide uninteresting nodes
@@ -234,6 +238,8 @@ pub struct ToolbarResponse {
     pub toggle_hide_uninteresting: bool,
     /// Toggle visibility of a specific layer
     pub toggle_layer: Option<NodeLayer>,
+    /// Trigger auto-layout
+    pub auto_layout: bool,
 }
 
 #[cfg(test)]

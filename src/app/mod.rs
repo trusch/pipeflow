@@ -17,6 +17,7 @@ mod ui_panels;
 
 use crate::core::commands::{AppCommand, CommandHandler, CommandRegistry, UiCommand};
 use crate::core::config::Config;
+use crate::core::history::{UndoAction, UndoEntry, UndoStack};
 use crate::core::state::SharedState;
 use crate::pipewire::connection::PwConnection;
 use crate::pipewire::meters::MeterCollector;
@@ -28,6 +29,8 @@ use crate::ui::help::show_help;
 use crate::ui::node_panel::NodePanel;
 use crate::ui::rules::RulesPanel;
 use crate::ui::settings::SettingsPanel;
+use crate::ui::snapshots::SnapshotPanel;
+use crate::domain::snapshots::SnapshotManager;
 use crate::ui::sidebar::{SidebarState, MAX_WIDTH, MIN_WIDTH};
 use crate::core::config::ThemePreference;
 use crate::ui::theme::Theme;
@@ -113,6 +116,10 @@ pub(crate) struct AppComponents {
     pub group_panel: GroupPanel,
     /// Rules management panel
     pub rules_panel: RulesPanel,
+    /// Snapshot management panel
+    pub snapshot_panel: SnapshotPanel,
+    /// Snapshot manager (persistence)
+    pub snapshot_manager: SnapshotManager,
     /// Visual theme settings
     pub theme: Theme,
 
@@ -127,6 +134,10 @@ pub(crate) struct AppComponents {
     // --- State flags ---
     /// Whether state needs layout save
     pub needs_layout_save: bool,
+
+    // --- Undo/Redo ---
+    /// Undo/redo history stack
+    pub undo_stack: UndoStack,
 
     // --- Dialogs ---
     /// Rename node dialog state
@@ -158,17 +169,27 @@ impl AppComponents {
         graph_view.zoom = saved_zoom;
         graph_view.pan = saved_pan;
 
+        let snapshot_manager = Config::data_dir()
+            .map(SnapshotManager::new)
+            .unwrap_or_else(|e| {
+                tracing::warn!("Failed to get data dir for snapshots: {}", e);
+                SnapshotManager::new(std::path::PathBuf::from("."))
+            });
+
         Self {
             command_registry: CommandRegistry::new(),
             command_palette: CommandPalette::new(),
             graph_view,
             group_panel: GroupPanel::new(),
             rules_panel: RulesPanel::new(),
+            snapshot_panel: SnapshotPanel::new(),
+            snapshot_manager,
             theme: Theme::dark(),
             show_inspector: true,
             show_help: false,
             show_settings: false,
             needs_layout_save: false,
+            undo_stack: UndoStack::default(),
             rename_dialog: RenameNodeDialog::default(),
             status_message: None,
             last_layout_save: std::time::Instant::now(),
@@ -200,11 +221,17 @@ impl eframe::App for PipeflowApp {
         }
         self.handle_global_shortcuts(ctx);
 
-        // Show command palette
+        // Show command palette (with node search entries)
+        let node_entries: Vec<(crate::util::id::NodeId, String)> = {
+            let state = self.state.read();
+            state.graph.nodes.values()
+                .map(|n| (n.id, state.ui.resolved_display_name(n).to_string()))
+                .collect()
+        };
         if let Some(action) = self
             .components
             .command_palette
-            .show(ctx, &self.components.command_registry)
+            .show(ctx, &self.components.command_registry, &node_entries)
         {
             self.handle_command_action(action);
         }
@@ -498,6 +525,10 @@ impl PipeflowApp {
             let mut state = self.state.write();
             state.ui.layer_visibility.toggle(layer);
         }
+
+        if response.auto_layout {
+            self.perform_auto_layout(false);
+        }
     }
 
     /// Renders the inspector panel (right side).
@@ -608,15 +639,35 @@ impl PipeflowApp {
                     }
                 }
                 self.handle_app_command(AppCommand::ToggleLink { link_id, active });
+                self.components.undo_stack.push(UndoEntry {
+                    description: if active { "Enable link" } else { "Disable link" }.to_string(),
+                    forward: UndoAction::AppCommand(AppCommand::ToggleLink { link_id, active }),
+                    reverse: UndoAction::AppCommand(AppCommand::ToggleLink { link_id, active: !active }),
+                });
             }
 
             if let Some(link_id) = response.remove_link {
+                let port_ids = {
+                    let state = self.state.read();
+                    state.graph.get_link(&link_id)
+                        .map(|l| (l.output_port, l.input_port))
+                };
                 {
                     let mut state = self.state.write();
                     state.graph.remove_link(&link_id);
                     state.ui.selected_link = None;
                 }
                 self.handle_app_command(AppCommand::RemoveLink(link_id));
+                if let Some((output_port, input_port)) = port_ids {
+                    self.components.undo_stack.push(UndoEntry {
+                        description: "Remove link".to_string(),
+                        forward: UndoAction::AppCommand(AppCommand::RemoveLink(link_id)),
+                        reverse: UndoAction::AppCommand(AppCommand::CreateLink {
+                            output_port,
+                            input_port,
+                        }),
+                    });
+                }
             }
         }
     }
@@ -650,11 +701,26 @@ impl PipeflowApp {
 
         // Handle link removal
         if let Some(link_id) = response.remove_link {
+            let port_ids = {
+                let state = self.state.read();
+                state.graph.get_link(&link_id)
+                    .map(|l| (l.output_port, l.input_port))
+            };
             {
                 let mut state = self.state.write();
                 state.graph.remove_link(&link_id);
             }
             self.handle_app_command(AppCommand::RemoveLink(link_id));
+            if let Some((output_port, input_port)) = port_ids {
+                self.components.undo_stack.push(UndoEntry {
+                    description: "Remove link".to_string(),
+                    forward: UndoAction::AppCommand(AppCommand::RemoveLink(link_id)),
+                    reverse: UndoAction::AppCommand(AppCommand::CreateLink {
+                        output_port,
+                        input_port,
+                    }),
+                });
+            }
         }
 
         // Handle link toggle
@@ -666,6 +732,11 @@ impl PipeflowApp {
                 }
             }
             self.handle_app_command(AppCommand::ToggleLink { link_id, active });
+            self.components.undo_stack.push(UndoEntry {
+                description: if active { "Enable link" } else { "Disable link" }.to_string(),
+                forward: UndoAction::AppCommand(AppCommand::ToggleLink { link_id, active }),
+                reverse: UndoAction::AppCommand(AppCommand::ToggleLink { link_id, active: !active }),
+            });
         }
 
         // Handle toggle uninteresting
@@ -814,6 +885,8 @@ impl PipeflowApp {
                     ui.label(egui_phosphor::regular::FOLDER).on_hover_text("Groups");
                     ui.add_space(12.0);
                     ui.label(egui_phosphor::regular::LINK).on_hover_text("Rules");
+                    ui.add_space(12.0);
+                    ui.label(egui_phosphor::regular::CAMERA).on_hover_text("Snapshots");
                 });
             } else {
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -851,6 +924,18 @@ impl PipeflowApp {
                                 )
                             };
                             self.handle_rules_panel_response(rules_response);
+                        });
+
+                    ui.add_space(4.0);
+
+                    egui::CollapsingHeader::new("Snapshots")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            let snap_response = self.components.snapshot_panel.show(
+                                ui,
+                                &self.components.snapshot_manager,
+                            );
+                            self.handle_snapshot_panel_response(snap_response);
                         });
                 });
             }
@@ -913,6 +998,190 @@ impl PipeflowApp {
         if let Some(rule_id) = response.apply_rule {
             self.apply_rule_now(rule_id);
         }
+    }
+
+    /// Handles snapshot panel responses.
+    fn handle_snapshot_panel_response(
+        &mut self,
+        response: crate::ui::snapshots::SnapshotPanelResponse,
+    ) {
+        // Capture new snapshot
+        if let Some(name) = response.capture_snapshot {
+            let state = self.state.read();
+            let result = self.components.snapshot_manager.capture(
+                name.clone(),
+                &state.graph,
+                command_handling::create_stable_identifier,
+            );
+            drop(state);
+            match result {
+                Ok(_id) => {
+                    self.components.status_message = Some((
+                        format!("Snapshot '{}' saved", name),
+                        std::time::Instant::now(),
+                        false,
+                    ));
+                }
+                Err(e) => {
+                    let msg = format!("Failed to save snapshot: {}", e);
+                    tracing::error!("{}", msg);
+                    self.components.status_message =
+                        Some((msg, std::time::Instant::now(), true));
+                }
+            }
+        }
+
+        // Delete snapshot
+        if let Some(id) = response.delete_snapshot {
+            if let Err(e) = self.components.snapshot_manager.delete(id) {
+                let msg = format!("Failed to delete snapshot: {}", e);
+                tracing::error!("{}", msg);
+                self.components.status_message =
+                    Some((msg, std::time::Instant::now(), true));
+            }
+        }
+
+        // Restore snapshot
+        if let Some(id) = response.restore_snapshot {
+            self.restore_snapshot(id);
+        }
+    }
+
+    /// Restores a snapshot by diffing current connections and applying changes.
+    fn restore_snapshot(&mut self, id: uuid::Uuid) {
+        use crate::domain::graph::PortDirection;
+
+        let snapshot = match self.components.snapshot_manager.get(id) {
+            Some(s) => s.clone(),
+            None => return,
+        };
+
+        let state = self.state.read();
+
+        // Build a lookup: NodeIdentifier -> Vec<NodeId> for current graph
+        let mut identifier_to_nodes: std::collections::HashMap<NodeIdentifier, Vec<crate::util::id::NodeId>> =
+            std::collections::HashMap::new();
+        for node in state.graph.nodes.values() {
+            let ident = command_handling::create_stable_identifier(node, &state.graph);
+            identifier_to_nodes.entry(ident).or_default().push(node.id);
+        }
+
+        // Resolve snapshot connections to port IDs
+        let mut desired_links: std::collections::HashSet<(crate::util::id::PortId, crate::util::id::PortId)> =
+            std::collections::HashSet::new();
+        let mut unresolved = 0usize;
+
+        for conn in &snapshot.connections {
+            // Find output port
+            let out_port = identifier_to_nodes
+                .get(&conn.output_node)
+                .and_then(|node_ids| {
+                    node_ids.iter().find_map(|nid| {
+                        state.graph.ports.values().find(|p| {
+                            p.node_id == *nid
+                                && p.name == conn.output_port_name
+                                && p.direction == PortDirection::Output
+                        })
+                    })
+                });
+
+            // Find input port
+            let in_port = identifier_to_nodes
+                .get(&conn.input_node)
+                .and_then(|node_ids| {
+                    node_ids.iter().find_map(|nid| {
+                        state.graph.ports.values().find(|p| {
+                            p.node_id == *nid
+                                && p.name == conn.input_port_name
+                                && p.direction == PortDirection::Input
+                        })
+                    })
+                });
+
+            match (out_port, in_port) {
+                (Some(op), Some(ip)) => {
+                    desired_links.insert((op.id, ip.id));
+                }
+                _ => {
+                    unresolved += 1;
+                }
+            }
+        }
+
+        // Diff: find links to remove (exist now but not in snapshot)
+        let mut links_to_remove = Vec::new();
+        for link in state.graph.links.values() {
+            let key = (link.output_port, link.input_port);
+            if !desired_links.contains(&key) {
+                links_to_remove.push(link.id);
+            }
+        }
+
+        // Diff: find links to create (in snapshot but not in current graph)
+        let mut links_to_create = Vec::new();
+        for &(out_port, in_port) in &desired_links {
+            let exists = state.graph.links.values().any(|l| {
+                l.output_port == out_port && l.input_port == in_port
+            });
+            if !exists {
+                links_to_create.push((out_port, in_port));
+            }
+        }
+
+        // Resolve volume changes
+        let mut volume_changes: Vec<(crate::util::id::NodeId, crate::domain::audio::VolumeControl)> = Vec::new();
+        for sv in &snapshot.volumes {
+            if let Some(node_ids) = identifier_to_nodes.get(&sv.identifier) {
+                for &nid in node_ids {
+                    volume_changes.push((nid, sv.volume.clone()));
+                }
+            }
+        }
+
+        drop(state);
+
+        // Apply removals
+        for link_id in &links_to_remove {
+            {
+                let mut state = self.state.write();
+                state.graph.remove_link(link_id);
+            }
+            self.handle_app_command(AppCommand::RemoveLink(*link_id));
+        }
+
+        // Apply creations
+        for (output_port, input_port) in &links_to_create {
+            self.handle_app_command(AppCommand::CreateLink {
+                output_port: *output_port,
+                input_port: *input_port,
+            });
+        }
+
+        // Apply volume changes
+        for (node_id, volume) in &volume_changes {
+            {
+                let mut state = self.state.write();
+                state.graph.volumes.insert(*node_id, volume.clone());
+            }
+            self.handle_app_command(AppCommand::SetVolume {
+                node_id: *node_id,
+                volume: volume.clone(),
+            });
+        }
+
+        let msg = format!(
+            "Restored '{}': -{} +{} links{}",
+            snapshot.name,
+            links_to_remove.len(),
+            links_to_create.len(),
+            if unresolved > 0 {
+                format!(" ({} unresolved)", unresolved)
+            } else {
+                String::new()
+            }
+        );
+        tracing::info!("{}", msg);
+        self.components.status_message = Some((msg, std::time::Instant::now(), false));
     }
 
     /// Applies a rule immediately (manual trigger).
@@ -1074,15 +1343,42 @@ impl PipeflowApp {
                 output_port: from,
                 input_port: to,
             });
+            self.components.undo_stack.push(UndoEntry {
+                description: "Create link".to_string(),
+                forward: UndoAction::AppCommand(AppCommand::CreateLink {
+                    output_port: from,
+                    input_port: to,
+                }),
+                reverse: UndoAction::RemoveLinkBetweenPorts {
+                    output_port: from,
+                    input_port: to,
+                },
+            });
         }
 
         // Remove link
         if let Some(link_id) = response.remove_link {
+            // Capture port IDs before removal for undo
+            let port_ids = {
+                let state = self.state.read();
+                state.graph.get_link(&link_id)
+                    .map(|l| (l.output_port, l.input_port))
+            };
             {
                 let mut state = self.state.write();
                 state.graph.remove_link(&link_id);
             }
             self.handle_app_command(AppCommand::RemoveLink(link_id));
+            if let Some((output_port, input_port)) = port_ids {
+                self.components.undo_stack.push(UndoEntry {
+                    description: "Remove link".to_string(),
+                    forward: UndoAction::AppCommand(AppCommand::RemoveLink(link_id)),
+                    reverse: UndoAction::AppCommand(AppCommand::CreateLink {
+                        output_port,
+                        input_port,
+                    }),
+                });
+            }
         }
 
         // Toggle link
@@ -1094,6 +1390,11 @@ impl PipeflowApp {
                 }
             }
             self.handle_app_command(AppCommand::ToggleLink { link_id, active });
+            self.components.undo_stack.push(UndoEntry {
+                description: if active { "Enable link" } else { "Disable link" }.to_string(),
+                forward: UndoAction::AppCommand(AppCommand::ToggleLink { link_id, active }),
+                reverse: UndoAction::AppCommand(AppCommand::ToggleLink { link_id, active: !active }),
+            });
         }
 
         // Toggle uninteresting

@@ -13,3 +13,4 @@ pub mod graph;
 pub mod groups;
 pub mod rules;
 pub mod safety;
+pub mod snapshots;

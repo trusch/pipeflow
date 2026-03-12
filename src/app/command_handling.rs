@@ -3,11 +3,12 @@
 //! Routes UI commands, app commands, and keyboard shortcuts to appropriate handlers.
 
 use crate::core::commands::{AppCommand, CommandAction, UiCommand};
+use crate::core::history::{UndoAction, UndoEntry};
 use crate::core::state::GraphState;
 use crate::domain::graph::Node;
 use crate::domain::rules::{ConnectionSpec, MatchPattern};
 use crate::util::id::{NodeId, NodeIdentifier};
-use crate::util::layout::{get_metering_target_id, is_metering_node};
+use crate::util::layout::{force_directed_layout, get_metering_target_id, is_metering_node, LayoutConfig};
 use crate::util::spatial::Position;
 
 use super::PipeflowApp;
@@ -142,7 +143,24 @@ impl PipeflowApp {
             return;
         }
 
+        let mut needs_undo = false;
+        let mut needs_redo = false;
+        let mut needs_open_palette = false;
+        let mut needs_auto_layout = false;
+
         ctx.input(|input| {
+            // Ctrl+Z - Undo
+            if input.key_pressed(egui::Key::Z) && input.modifiers.command && !input.modifiers.shift {
+                needs_undo = true;
+            }
+
+            // Ctrl+Shift+Z or Ctrl+Y - Redo
+            if (input.key_pressed(egui::Key::Z) && input.modifiers.command && input.modifiers.shift)
+                || (input.key_pressed(egui::Key::Y) && input.modifiers.command)
+            {
+                needs_redo = true;
+            }
+
             // Escape - Clear selection
             if input.key_pressed(egui::Key::Escape) {
                 self.handle_ui_command(UiCommand::ClearSelection);
@@ -196,7 +214,33 @@ impl PipeflowApp {
             if input.key_pressed(egui::Key::Num0) && input.modifiers.command {
                 self.components.graph_view.reset_view();
             }
+
+            // / (slash) - Open command palette (search)
+            if input.key_pressed(egui::Key::Slash) && !input.modifiers.command {
+                needs_open_palette = true;
+            }
+
+            // Ctrl+L - Auto-layout
+            if input.key_pressed(egui::Key::L) && input.modifiers.command {
+                needs_auto_layout = true;
+            }
         });
+
+        if needs_open_palette {
+            self.components.command_palette.open();
+        }
+
+        if needs_auto_layout {
+            self.perform_auto_layout(false);
+        }
+
+        // Execute undo/redo outside the input closure (needs &mut self)
+        if needs_undo {
+            self.perform_undo();
+        }
+        if needs_redo {
+            self.perform_redo();
+        }
     }
 
     /// Handles command palette action.
@@ -239,11 +283,136 @@ impl PipeflowApp {
                     "toggle_right_sidebar" => {
                         self.components.right_sidebar.toggle();
                     }
+                    "save_snapshot" => {
+                        // Quick-save snapshot with auto-generated name
+                        let name = format!("Snapshot {}", self.components.snapshot_manager.list().len() + 1);
+                        let state = self.state.read();
+                        let result = self.components.snapshot_manager.capture(
+                            name.clone(),
+                            &state.graph,
+                            create_stable_identifier,
+                        );
+                        drop(state);
+                        match result {
+                            Ok(_) => {
+                                self.components.status_message = Some((
+                                    format!("Snapshot '{}' saved", name),
+                                    std::time::Instant::now(),
+                                    false,
+                                ));
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to save snapshot: {}", e);
+                            }
+                        }
+                    }
+                    "undo" => {
+                        self.perform_undo();
+                    }
+                    "redo" => {
+                        self.perform_redo();
+                    }
+                    "auto_layout" => {
+                        self.perform_auto_layout(false);
+                    }
+                    "auto_layout_selected" => {
+                        self.perform_auto_layout(true);
+                    }
                     _ => {
                         tracing::warn!("Unknown custom command: {}", name);
                     }
                 }
             }
+            CommandAction::GoToNode(node_id) => {
+                self.handle_ui_command(UiCommand::SelectNode(node_id));
+                let state = self.state.read();
+                if let Some(pos) = state.ui.node_positions.get(&node_id) {
+                    self.components.graph_view.pan = egui::Vec2::new(
+                        -pos.x * self.components.graph_view.zoom,
+                        -pos.y * self.components.graph_view.zoom,
+                    );
+                    self.components.graph_view.zoom = 1.0;
+                }
+            }
+        }
+    }
+
+    /// Performs auto-layout using force-directed algorithm.
+    pub(super) fn perform_auto_layout(&mut self, selected_only: bool) {
+        let state = self.state.read();
+
+        let nodes: Vec<_> = if selected_only {
+            state.graph.nodes.values()
+                .filter(|n| state.ui.selected_nodes.contains(&n.id))
+                .map(|n| (n.id, n.media_class.clone()))
+                .collect()
+        } else {
+            state.graph.nodes.values()
+                .map(|n| (n.id, n.media_class.clone()))
+                .collect()
+        };
+
+        if nodes.is_empty() {
+            return;
+        }
+
+        let links: Vec<_> = state.graph.links.values()
+            .map(|l| (l.output_node, l.input_node))
+            .collect();
+        let positions = state.ui.node_positions.clone();
+        let config = LayoutConfig::default();
+        drop(state);
+
+        let new_positions = force_directed_layout(&nodes, &links, &positions, &config);
+        for (id, pos) in new_positions {
+            self.handle_ui_command(UiCommand::SetNodePosition(id, pos.x, pos.y));
+        }
+    }
+
+    // --- Undo/Redo ---
+
+    /// Executes an UndoAction (recursing into batches).
+    fn execute_undo_action(&mut self, action: UndoAction) {
+        match action {
+            UndoAction::AppCommand(cmd) => self.handle_app_command(cmd),
+            UndoAction::UiCommand(cmd) => self.handle_ui_command(cmd),
+            UndoAction::RemoveLinkBetweenPorts { output_port, input_port } => {
+                // Find the link between these ports and remove it
+                let link_id = {
+                    let state = self.state.read();
+                    state.graph.links.values()
+                        .find(|l| l.output_port == output_port && l.input_port == input_port)
+                        .map(|l| l.id)
+                };
+                if let Some(link_id) = link_id {
+                    {
+                        let mut state = self.state.write();
+                        state.graph.remove_link(&link_id);
+                    }
+                    self.handle_app_command(AppCommand::RemoveLink(link_id));
+                } else {
+                    tracing::warn!("Undo: could not find link between ports {:?} -> {:?}", output_port, input_port);
+                }
+            }
+            UndoAction::Batch(actions) => {
+                for a in actions {
+                    self.execute_undo_action(a);
+                }
+            }
+        }
+    }
+
+    /// Performs an undo operation.
+    pub(super) fn perform_undo(&mut self) {
+        if let Some(action) = self.components.undo_stack.undo() {
+            self.execute_undo_action(action);
+        }
+    }
+
+    /// Performs a redo operation.
+    pub(super) fn perform_redo(&mut self) {
+        if let Some(action) = self.components.undo_stack.redo() {
+            self.execute_undo_action(action);
         }
     }
 
@@ -268,18 +437,29 @@ impl PipeflowApp {
     }
 
     fn handle_delete_selected_link(&mut self) {
-        let link_to_remove = {
+        let link_info = {
             let state = self.state.read();
-            state.ui.selected_link
+            state.ui.selected_link.and_then(|link_id| {
+                state.graph.get_link(&link_id)
+                    .map(|l| (link_id, l.output_port, l.input_port))
+            })
         };
 
-        if let Some(link_id) = link_to_remove {
+        if let Some((link_id, output_port, input_port)) = link_info {
             {
                 let mut state = self.state.write();
                 state.graph.remove_link(&link_id);
                 state.ui.selected_link = None;
             }
             self.handle_app_command(AppCommand::RemoveLink(link_id));
+            self.components.undo_stack.push(UndoEntry {
+                description: "Remove link".to_string(),
+                forward: UndoAction::AppCommand(AppCommand::RemoveLink(link_id)),
+                reverse: UndoAction::AppCommand(AppCommand::CreateLink {
+                    output_port,
+                    input_port,
+                }),
+            });
         }
     }
 

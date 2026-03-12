@@ -248,6 +248,137 @@ impl Default for SmartLayout {
     }
 }
 
+/// Performs a force-directed layout on nodes.
+///
+/// Uses a simple spring-electric model:
+/// - Repulsion between all node pairs (Coulomb's law)
+/// - Attraction along links (Hooke's law)
+/// - Layer bias to create left-to-right flow (sources → sinks)
+pub fn force_directed_layout(
+    nodes: &[(NodeId, Option<MediaClass>)],
+    links: &[(NodeId, NodeId)],
+    existing_positions: &HashMap<NodeId, Position>,
+    _config: &LayoutConfig,
+) -> HashMap<NodeId, Position> {
+    if nodes.is_empty() {
+        return HashMap::new();
+    }
+
+    const ITERATIONS: usize = 200;
+    const REPULSION: f32 = 5000.0;
+    const ATTRACTION: f32 = 0.01;
+    const LAYER_BIAS: f32 = 0.5;
+    const DAMPING: f32 = 0.9;
+    const MAX_VELOCITY: f32 = 50.0;
+    const MIN_DIST: f32 = 1.0;
+
+    // Build index for fast lookup
+    let node_indices: HashMap<NodeId, usize> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, (id, _))| (*id, i))
+        .collect();
+
+    // Initialize positions
+    let mut positions: Vec<[f32; 2]> = nodes
+        .iter()
+        .enumerate()
+        .map(|(i, (id, _))| {
+            if let Some(pos) = existing_positions.get(id) {
+                [pos.x, pos.y]
+            } else {
+                // Spread unpositioned nodes in a grid pattern
+                let row = i / 5;
+                let col = i % 5;
+                [col as f32 * 250.0, row as f32 * 150.0]
+            }
+        })
+        .collect();
+
+    let mut velocities: Vec<[f32; 2]> = vec![[0.0, 0.0]; nodes.len()];
+    let n = nodes.len();
+
+    for _ in 0..ITERATIONS {
+        let mut forces: Vec<[f32; 2]> = vec![[0.0, 0.0]; n];
+
+        // Repulsion: every pair
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let dx = positions[i][0] - positions[j][0];
+                let dy = positions[i][1] - positions[j][1];
+                let dist_sq = (dx * dx + dy * dy).max(MIN_DIST);
+                let dist = dist_sq.sqrt();
+                let force = REPULSION / dist_sq;
+                let fx = force * dx / dist;
+                let fy = force * dy / dist;
+                forces[i][0] += fx;
+                forces[i][1] += fy;
+                forces[j][0] -= fx;
+                forces[j][1] -= fy;
+            }
+        }
+
+        // Attraction: along links
+        for (out_id, in_id) in links {
+            let Some(&i) = node_indices.get(out_id) else {
+                continue;
+            };
+            let Some(&j) = node_indices.get(in_id) else {
+                continue;
+            };
+            let dx = positions[j][0] - positions[i][0];
+            let dy = positions[j][1] - positions[i][1];
+            let dist = (dx * dx + dy * dy).sqrt().max(MIN_DIST);
+            let force = ATTRACTION * dist;
+            let fx = force * dx / dist;
+            let fy = force * dy / dist;
+            forces[i][0] += fx;
+            forces[i][1] += fy;
+            forces[j][0] -= fx;
+            forces[j][1] -= fy;
+        }
+
+        // Layer bias: sources left, sinks right
+        for (i, (_id, media_class)) in nodes.iter().enumerate() {
+            if let Some(mc) = media_class {
+                let col = mc.layout_column();
+                if col != 0 {
+                    forces[i][0] += col as f32 * LAYER_BIAS;
+                }
+            }
+        }
+
+        // Apply forces with damping
+        for i in 0..n {
+            velocities[i][0] = (velocities[i][0] + forces[i][0]) * DAMPING;
+            velocities[i][1] = (velocities[i][1] + forces[i][1]) * DAMPING;
+
+            // Clamp velocity
+            let speed = (velocities[i][0].powi(2) + velocities[i][1].powi(2)).sqrt();
+            if speed > MAX_VELOCITY {
+                let scale = MAX_VELOCITY / speed;
+                velocities[i][0] *= scale;
+                velocities[i][1] *= scale;
+            }
+
+            positions[i][0] += velocities[i][0];
+            positions[i][1] += velocities[i][1];
+        }
+    }
+
+    // Center around (0, 0)
+    let cx: f32 = positions.iter().map(|p| p[0]).sum::<f32>() / n as f32;
+    let cy: f32 = positions.iter().map(|p| p[1]).sum::<f32>() / n as f32;
+
+    nodes
+        .iter()
+        .enumerate()
+        .map(|(i, (id, _))| {
+            (*id, Position::new(positions[i][0] - cx, positions[i][1] - cy))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

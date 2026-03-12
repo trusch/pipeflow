@@ -18,4 +18,5 @@ pub mod rules;
 pub mod settings;
 pub mod sidebar;
 pub mod theme;
+pub mod snapshots;
 pub mod toolbar;
