@@ -480,7 +480,7 @@ impl PipeflowApp {
                 .show(ctx, |ui| {
                     ui.add_space(8.0);
                     ui.vertical_centered(|ui| {
-                        if ui.button("◀").on_hover_text("Show Inspector (I)").clicked() {
+                        if ui.button(egui_phosphor::regular::CARET_LEFT).on_hover_text("Show Inspector (I)").clicked() {
                             self.components.show_inspector = true;
                             self.components.right_sidebar.expand();
                         }
@@ -513,12 +513,12 @@ impl PipeflowApp {
             ui.horizontal(|ui| {
                 if show_collapsed {
                     ui.vertical_centered(|ui| {
-                        if ui.button("◀").on_hover_text("Expand (])").clicked() {
+                        if ui.button(egui_phosphor::regular::CARET_LEFT).on_hover_text("Expand (])").clicked() {
                             toggle = true;
                         }
                     });
                 } else {
-                    if ui.button("▶").on_hover_text("Collapse (])").clicked() {
+                    if ui.button(egui_phosphor::regular::CARET_RIGHT).on_hover_text("Collapse (])").clicked() {
                         toggle = true;
                     }
                     ui.heading("Inspector");
@@ -756,13 +756,13 @@ impl PipeflowApp {
             ui.horizontal(|ui| {
                 if show_collapsed {
                     ui.vertical_centered(|ui| {
-                        if ui.button("▶").on_hover_text("Expand ([)").clicked() {
+                        if ui.button(egui_phosphor::regular::CARET_RIGHT).on_hover_text("Expand ([)").clicked() {
                             toggle = true;
                         }
                     });
                 } else {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("◀").on_hover_text("Collapse ([)").clicked() {
+                        if ui.button(egui_phosphor::regular::CARET_LEFT).on_hover_text("Collapse ([)").clicked() {
                             toggle = true;
                         }
                     });
@@ -779,14 +779,11 @@ impl PipeflowApp {
             if show_collapsed {
                 ui.vertical_centered(|ui| {
                     ui.add_space(8.0);
-                    ui.label("🔍");
-                    ui.weak("Filter");
-                    ui.add_space(8.0);
-                    ui.label("📁");
-                    ui.weak("Groups");
-                    ui.add_space(8.0);
-                    ui.label("🔗");
-                    ui.weak("Rules");
+                    ui.label(egui_phosphor::regular::MAGNIFYING_GLASS).on_hover_text("Filters");
+                    ui.add_space(12.0);
+                    ui.label(egui_phosphor::regular::FOLDER).on_hover_text("Groups");
+                    ui.add_space(12.0);
+                    ui.label(egui_phosphor::regular::LINK).on_hover_text("Rules");
                 });
             } else {
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -1019,6 +1016,9 @@ impl PipeflowApp {
 
         // Box selection
         if !response.box_selected_nodes.is_empty() {
+            if !response.box_selection_additive {
+                self.handle_ui_command(UiCommand::ClearSelection);
+            }
             for node_id in response.box_selected_nodes {
                 self.handle_ui_command(UiCommand::AddToSelection(node_id));
             }

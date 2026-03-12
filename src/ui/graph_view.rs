@@ -5,7 +5,23 @@
 use crate::core::state::{GraphState, LayerVisibility};
 use crate::domain::explain::explain_node_short;
 use crate::domain::filters::FilterSet;
+use crate::domain::graph::MediaClass;
 use crate::util::is_metering_node;
+
+/// Returns a Phosphor icon string for a given media class, or None for unknown/other.
+fn media_class_icon(media_class: Option<&MediaClass>) -> Option<&'static str> {
+    match media_class {
+        Some(MediaClass::AudioSource) => Some(egui_phosphor::regular::MICROPHONE),
+        Some(MediaClass::AudioSink) => Some(egui_phosphor::regular::SPEAKER_HIGH),
+        Some(MediaClass::StreamInputAudio) => Some(egui_phosphor::regular::WAVEFORM),
+        Some(MediaClass::StreamOutputAudio) => Some(egui_phosphor::regular::WAVEFORM),
+        Some(MediaClass::MidiSource) | Some(MediaClass::MidiSink) => Some(egui_phosphor::regular::PIANO_KEYS),
+        Some(MediaClass::VideoSource) | Some(MediaClass::VideoSink) | Some(MediaClass::VideoDevice) => Some(egui_phosphor::regular::MONITOR_PLAY),
+        Some(MediaClass::AudioDevice) => Some(egui_phosphor::regular::SPEAKER_HIGH),
+        Some(MediaClass::AudioVideoSource) => Some(egui_phosphor::regular::MONITOR_PLAY),
+        _ => None,
+    }
+}
 
 /// Truncates a string to fit within a maximum width in pixels using actual font measurement.
 /// Uses smart truncation: shows beginning and end of text (e.g., "playback_F..._FL")
@@ -292,8 +308,6 @@ impl GraphView {
         // Handle panning with middle mouse, right-click drag, or shift+left
         if canvas_response.dragged_by(egui::PointerButton::Middle)
             || canvas_response.dragged_by(egui::PointerButton::Secondary)
-            || (canvas_response.dragged_by(egui::PointerButton::Primary)
-                && ui.input(|i| i.modifiers.shift))
         {
             self.pan += canvas_response.drag_delta();
         }
@@ -302,7 +316,6 @@ impl GraphView {
         if canvas_response.drag_started_by(egui::PointerButton::Primary)
             && self.hovered_node.is_none()
             && self.hovered_port.is_none()
-            && !ui.input(|i| i.modifiers.shift)
         {
             self.box_selection_start = Some(mouse_pos);
         }
@@ -320,6 +333,7 @@ impl GraphView {
                     &GraphTransform::new(rect.center(), self.zoom, self.pan),
                     theme,
                 );
+                response.box_selection_additive = ui.input(|i| i.modifiers.shift);
             }
         }
 
@@ -893,11 +907,17 @@ impl GraphView {
         let truncated_name = ui.fonts_mut(|fonts| {
             truncate_text_measured(name, max_text_width, &font_id, fonts)
         });
+        // Prepend media class icon if available
+        let display_text = if let Some(icon) = media_class_icon(node.media_class.as_ref()) {
+            format!("{} {}", icon, truncated_name)
+        } else {
+            truncated_name
+        };
         let text_color = dim_color(theme.text.primary);
         painter.text(
             header_rect.center(),
             egui::Align2::CENTER_CENTER,
-            truncated_name,
+            display_text,
             font_id,
             text_color,
         );
@@ -971,6 +991,11 @@ impl GraphView {
         // Click to select (only if not on a port and no connection being created)
         if node_response.clicked() && self.hovered_port.is_none() && response.started_connection.is_none() {
             response.clicked_node = Some(node.id);
+        }
+
+        // Double-click to rename
+        if node_response.double_clicked() && self.hovered_port.is_none() && response.started_connection.is_none() {
+            response.rename_node = Some(node.id);
         }
 
         // Allow dragging any node for a natural feel
@@ -1645,12 +1670,34 @@ impl GraphView {
                 .unwrap_or(Position::zero());
             let screen_pos = transform.graph_to_screen(Pos2::new(pos.x, pos.y));
 
-            // Calculate node rectangle
+            // Use correct width for meter nodes
+            let is_meter = is_metering_node(&node.name);
+            let node_width = if is_meter {
+                theme.sizes.node_width * 0.55
+            } else {
+                theme.sizes.node_width
+            };
+
+            // Compute real height matching draw_node
+            let ports = graph.ports_for_node(&node.id);
+            let input_count = ports.iter().filter(|p| p.direction == PortDirection::Input).count();
+            let output_count = ports.iter().filter(|p| p.direction == PortDirection::Output).count();
+            let max_ports = input_count.max(output_count);
+
+            let meter_data = graph.meters.get(&node.id);
+            let has_meter = meter_data.map(|m| m.max_peak() > 0.0).unwrap_or(false);
+            let meter_height = if has_meter { 8.0 } else { 0.0 };
+
+            let node_height = theme.sizes.node_header_height
+                + meter_height
+                + (max_ports as f32 * theme.sizes.port_height)
+                + 8.0;
+
             let node_rect = Rect::from_min_size(
                 screen_pos,
                 Vec2::new(
-                    theme.sizes.node_width * self.zoom,
-                    100.0 * self.zoom, // Approximate height
+                    node_width * self.zoom,
+                    node_height * self.zoom,
                 ),
             );
 
@@ -1730,6 +1777,8 @@ pub struct GraphViewResponse {
     pub clicked_background: bool,
     /// Nodes selected by box selection
     pub box_selected_nodes: Vec<NodeId>,
+    /// Whether box selection should add to existing selection (shift held)
+    pub box_selection_additive: bool,
     /// Snap to grid requested (None = all nodes, Some = specific nodes)
     pub snap_to_grid: Option<Option<Vec<NodeId>>>,
     /// Toggle uninteresting status for nodes
