@@ -22,6 +22,8 @@ impl Toolbar {
         meter_config: &MeterConfig,
         hide_uninteresting: bool,
         layer_visibility: &LayerVisibility,
+        can_undo: bool,
+        can_redo: bool,
         theme: &Theme,
     ) -> ToolbarResponse {
         let mut response = ToolbarResponse::default();
@@ -38,7 +40,7 @@ impl Toolbar {
             ui.separator();
 
             // Quick actions
-            Self::show_quick_actions(ui, hide_uninteresting, &mut response, theme);
+            Self::show_quick_actions(ui, hide_uninteresting, can_undo, can_redo, &mut response, theme);
 
             ui.separator();
 
@@ -114,7 +116,27 @@ impl Toolbar {
     }
 
     /// Shows quick action buttons.
-    fn show_quick_actions(ui: &mut Ui, hide_uninteresting: bool, response: &mut ToolbarResponse, theme: &Theme) {
+    fn show_quick_actions(ui: &mut Ui, hide_uninteresting: bool, can_undo: bool, can_redo: bool, response: &mut ToolbarResponse, theme: &Theme) {
+        // Undo button
+        let undo_color = if can_undo { theme.text.primary } else { theme.text.muted };
+        if ui.add_enabled(can_undo, egui::Button::new(RichText::new(egui_phosphor::regular::ARROW_U_UP_LEFT).color(undo_color)))
+            .on_hover_text("Undo (Ctrl+Z)")
+            .clicked()
+        {
+            response.undo = true;
+        }
+
+        // Redo button
+        let redo_color = if can_redo { theme.text.primary } else { theme.text.muted };
+        if ui.add_enabled(can_redo, egui::Button::new(RichText::new(egui_phosphor::regular::ARROW_U_UP_RIGHT).color(redo_color)))
+            .on_hover_text("Redo (Ctrl+Shift+Z)")
+            .clicked()
+        {
+            response.redo = true;
+        }
+
+        ui.separator();
+
         if ui.button(egui_phosphor::regular::ARROWS_CLOCKWISE).on_hover_text("Refresh (R)").clicked() {
             response.refresh = true;
         }
@@ -240,6 +262,10 @@ pub struct ToolbarResponse {
     pub toggle_layer: Option<NodeLayer>,
     /// Trigger auto-layout
     pub auto_layout: bool,
+    /// Trigger undo
+    pub undo: bool,
+    /// Trigger redo
+    pub redo: bool,
 }
 
 #[cfg(test)]

@@ -344,17 +344,24 @@ impl PipeflowApp {
         let nodes: Vec<_> = if selected_only {
             state.graph.nodes.values()
                 .filter(|n| state.ui.selected_nodes.contains(&n.id))
-                .map(|n| (n.id, n.media_class.clone()))
+                .map(|n| (n.id, n.media_class.clone(), n.name.clone()))
                 .collect()
         } else {
             state.graph.nodes.values()
-                .map(|n| (n.id, n.media_class.clone()))
+                .map(|n| (n.id, n.media_class.clone(), n.name.clone()))
                 .collect()
         };
 
         if nodes.is_empty() {
             return;
         }
+
+        // Capture old positions before layout for undo
+        let old_positions: Vec<(NodeId, Position)> = nodes.iter()
+            .filter_map(|(id, _, _)| {
+                state.ui.node_positions.get(id).map(|pos| (*id, *pos))
+            })
+            .collect();
 
         let links: Vec<_> = state.graph.links.values()
             .map(|l| (l.output_node, l.input_node))
@@ -364,9 +371,27 @@ impl PipeflowApp {
         drop(state);
 
         let new_positions = force_directed_layout(&nodes, &links, &positions, &config);
-        for (id, pos) in new_positions {
-            self.handle_ui_command(UiCommand::SetNodePosition(id, pos.x, pos.y));
+        let new_positions_vec: Vec<(NodeId, Position)> = new_positions.iter()
+            .map(|(id, pos)| (*id, *pos))
+            .collect();
+
+        for (id, pos) in &new_positions {
+            self.handle_ui_command(UiCommand::SetNodePosition(*id, pos.x, pos.y));
         }
+
+        // Push batch undo entry
+        let reverse_actions: Vec<UndoAction> = old_positions.iter()
+            .map(|(id, pos)| UndoAction::UiCommand(UiCommand::SetNodePosition(*id, pos.x, pos.y)))
+            .collect();
+        let forward_actions: Vec<UndoAction> = new_positions_vec.iter()
+            .map(|(id, pos)| UndoAction::UiCommand(UiCommand::SetNodePosition(*id, pos.x, pos.y)))
+            .collect();
+
+        self.components.undo_stack.push(UndoEntry {
+            description: "Auto-Layout".to_string(),
+            forward: UndoAction::Batch(forward_actions),
+            reverse: UndoAction::Batch(reverse_actions),
+        });
     }
 
     // --- Undo/Redo ---

@@ -480,6 +480,8 @@ impl PipeflowApp {
     fn render_toolbar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             let state = self.state.read();
+            let can_undo = self.components.undo_stack.can_undo();
+            let can_redo = self.components.undo_stack.can_redo();
             let response = Toolbar::show(
                 ui,
                 &state.safety,
@@ -487,6 +489,8 @@ impl PipeflowApp {
                 &self.config.meters,
                 state.ui.hide_uninteresting,
                 &state.ui.layer_visibility,
+                can_undo,
+                can_redo,
                 &self.components.theme,
             );
             drop(state);
@@ -528,6 +532,13 @@ impl PipeflowApp {
 
         if response.auto_layout {
             self.perform_auto_layout(false);
+        }
+
+        if response.undo {
+            self.perform_undo();
+        }
+        if response.redo {
+            self.perform_redo();
         }
     }
 

@@ -255,35 +255,58 @@ impl Default for SmartLayout {
 /// - Attraction along links (Hooke's law)
 /// - Layer bias to create left-to-right flow (sources → sinks)
 pub fn force_directed_layout(
-    nodes: &[(NodeId, Option<MediaClass>)],
+    nodes: &[(NodeId, Option<MediaClass>, String)],
     links: &[(NodeId, NodeId)],
     existing_positions: &HashMap<NodeId, Position>,
-    _config: &LayoutConfig,
+    config: &LayoutConfig,
 ) -> HashMap<NodeId, Position> {
     if nodes.is_empty() {
         return HashMap::new();
     }
 
+    // Identify satellite (metering) nodes and map them to their parents
+    let mut satellite_to_parent: HashMap<NodeId, NodeId> = HashMap::new();
+    for (id, _, name) in nodes {
+        if is_metering_node(name) {
+            if let Some(parent_id) = get_metering_target_id(name) {
+                satellite_to_parent.insert(*id, parent_id);
+            }
+        }
+    }
+
+    // Filter to only non-satellite nodes for the simulation
+    let sim_nodes: Vec<&(NodeId, Option<MediaClass>, String)> = nodes
+        .iter()
+        .filter(|(id, _, _)| !satellite_to_parent.contains_key(id))
+        .collect();
+
+    if sim_nodes.is_empty() {
+        // All nodes are satellites with no parents in this set — just return existing
+        return nodes.iter().map(|(id, _, _)| (*id, existing_positions.get(id).copied().unwrap_or(Position::new(0.0, 0.0)))).collect();
+    }
+
     const ITERATIONS: usize = 200;
-    const REPULSION: f32 = 5000.0;
-    const ATTRACTION: f32 = 0.01;
+    const REPULSION: f32 = 2000.0;
+    const ATTRACTION: f32 = 0.05;
     const LAYER_BIAS: f32 = 0.5;
     const DAMPING: f32 = 0.9;
     const MAX_VELOCITY: f32 = 50.0;
     const MIN_DIST: f32 = 1.0;
 
-    // Build index for fast lookup
-    let node_indices: HashMap<NodeId, usize> = nodes
+    // Build index for fast lookup (only simulated nodes)
+    let node_indices: HashMap<NodeId, usize> = sim_nodes
         .iter()
         .enumerate()
-        .map(|(i, (id, _))| (*id, i))
+        .map(|(i, (id, _, _))| (*id, i))
         .collect();
 
+    let n = sim_nodes.len();
+
     // Initialize positions
-    let mut positions: Vec<[f32; 2]> = nodes
+    let mut positions: Vec<[f32; 2]> = sim_nodes
         .iter()
         .enumerate()
-        .map(|(i, (id, _))| {
+        .map(|(i, (id, _, _))| {
             if let Some(pos) = existing_positions.get(id) {
                 [pos.x, pos.y]
             } else {
@@ -295,8 +318,7 @@ pub fn force_directed_layout(
         })
         .collect();
 
-    let mut velocities: Vec<[f32; 2]> = vec![[0.0, 0.0]; nodes.len()];
-    let n = nodes.len();
+    let mut velocities: Vec<[f32; 2]> = vec![[0.0, 0.0]; n];
 
     for _ in 0..ITERATIONS {
         let mut forces: Vec<[f32; 2]> = vec![[0.0, 0.0]; n];
@@ -318,7 +340,7 @@ pub fn force_directed_layout(
             }
         }
 
-        // Attraction: along links
+        // Attraction: along links (only between simulated nodes)
         for (out_id, in_id) in links {
             let Some(&i) = node_indices.get(out_id) else {
                 continue;
@@ -339,7 +361,7 @@ pub fn force_directed_layout(
         }
 
         // Layer bias: sources left, sinks right
-        for (i, (_id, media_class)) in nodes.iter().enumerate() {
+        for (i, (_id, media_class, _)) in sim_nodes.iter().enumerate() {
             if let Some(mc) = media_class {
                 let col = mc.layout_column();
                 if col != 0 {
@@ -370,13 +392,33 @@ pub fn force_directed_layout(
     let cx: f32 = positions.iter().map(|p| p[0]).sum::<f32>() / n as f32;
     let cy: f32 = positions.iter().map(|p| p[1]).sum::<f32>() / n as f32;
 
-    nodes
+    let mut result: HashMap<NodeId, Position> = sim_nodes
         .iter()
         .enumerate()
-        .map(|(i, (id, _))| {
+        .map(|(i, (id, _, _))| {
             (*id, Position::new(positions[i][0] - cx, positions[i][1] - cy))
         })
-        .collect()
+        .collect();
+
+    // Place satellite nodes next to their parents
+    for (satellite_id, parent_id) in &satellite_to_parent {
+        if let Some(parent_pos) = result.get(parent_id) {
+            let sat_pos = Position::new(
+                parent_pos.x + config.node_width + config.satellite_gap,
+                parent_pos.y + config.satellite_offset_y,
+            );
+            result.insert(*satellite_id, sat_pos);
+        } else if let Some(parent_pos) = existing_positions.get(parent_id) {
+            // Parent wasn't in the simulation (e.g. selected_only mode) — use existing position
+            let sat_pos = Position::new(
+                parent_pos.x + config.node_width + config.satellite_gap,
+                parent_pos.y + config.satellite_offset_y,
+            );
+            result.insert(*satellite_id, sat_pos);
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]
