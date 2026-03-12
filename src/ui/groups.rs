@@ -148,7 +148,7 @@ impl GroupPanel {
             ui.add_space(4.0);
 
             // Collapse toggle
-            let collapse_text = if group.collapsed { "▶" } else { "▼" };
+            let collapse_text = if group.collapsed { egui_phosphor::regular::CARET_RIGHT } else { egui_phosphor::regular::CARET_DOWN };
             if ui.small_button(collapse_text).on_hover_text(if group.collapsed { "Expand" } else { "Collapse" }).clicked() {
                 panel_response.toggle_collapsed = Some(group_id);
             }
@@ -200,12 +200,12 @@ impl GroupPanel {
             // Action buttons - right aligned, consistent order: edit, delete
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Delete (rightmost)
-                if ui.small_button("×").on_hover_text("Delete group").clicked() {
+                if ui.small_button(egui_phosphor::regular::X).on_hover_text("Delete group").clicked() {
                     groups_to_remove.push(group_id);
                 }
 
                 // Edit/Rename
-                if ui.small_button("✎").on_hover_text("Rename group").clicked() {
+                if ui.small_button(egui_phosphor::regular::PENCIL_SIMPLE).on_hover_text("Rename group").clicked() {
                     self.editing_group = Some(group_id);
                     self.edit_buffer = group.name.clone();
                 }
@@ -237,7 +237,7 @@ impl GroupPanel {
                         node_label.on_hover_text(format!("{}\n\nClick to select, Shift+click to add", &name));
 
                         // Remove button
-                        if ui.small_button("×").on_hover_text("Remove from group").clicked() {
+                        if ui.small_button(egui_phosphor::regular::X).on_hover_text("Remove from group").clicked() {
                             panel_response.remove_from_group = Some((node_id, group_id));
                         }
                     });

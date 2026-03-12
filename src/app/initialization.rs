@@ -190,6 +190,11 @@ impl PipeflowApp {
         style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(4);
         style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
         ctx.set_style(style);
+
+        // Register Phosphor icon font
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        ctx.set_fonts(fonts);
     }
 }
 

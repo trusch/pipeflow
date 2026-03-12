@@ -158,7 +158,7 @@ pub fn explain_node(node: &Node, graph: &GraphState) -> String {
 
     // Status
     if !node.is_active {
-        lines.push("⚠ Currently inactive (paused or suspended)".to_string());
+        lines.push(format!("{} Currently inactive (paused or suspended)", egui_phosphor::regular::WARNING));
     }
 
     // Audio format
@@ -277,7 +277,7 @@ pub fn explain_node(node: &Node, graph: &GraphState) -> String {
 
     // Volume control error
     if let Some(err) = graph.volume_control_failed.get(&node.id) {
-        lines.push(format!("⚠ Volume control unavailable: {}", err));
+        lines.push(format!("{} Volume control unavailable: {}", egui_phosphor::regular::WARNING, err));
     }
 
     lines.join("\n")

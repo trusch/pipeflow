@@ -254,12 +254,12 @@ impl RulesPanel {
 
             // Right-aligned action buttons
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("×").on_hover_text("Delete rule").clicked() {
+                if ui.small_button(egui_phosphor::regular::X).on_hover_text("Delete rule").clicked() {
                     rules_to_remove.push(rule_id);
                 }
 
                 if ui
-                    .small_button("▶")
+                    .small_button(egui_phosphor::regular::PLAY)
                     .on_hover_text("Apply rule now")
                     .clicked()
                 {
@@ -300,15 +300,15 @@ impl RulesPanel {
                     .weak()
             } else if info.total_active == info.total_possible {
                 RichText::new(format!(
-                    "{} connections ({} active) \u{2713}",
-                    info.total_possible, info.total_active
+                    "{} connections ({} active) {}",
+                    info.total_possible, info.total_active, egui_phosphor::regular::CHECK
                 ))
                 .color(Color32::from_rgb(0, 180, 120))
             } else {
                 let missing = info.total_possible - info.total_active;
                 RichText::new(format!(
-                    "{} connections ({} missing) \u{26A0}",
-                    info.total_possible, missing
+                    "{} connections ({} missing) {}",
+                    info.total_possible, missing, egui_phosphor::regular::WARNING
                 ))
                 .color(ui.visuals().warn_fg_color)
             };
@@ -338,8 +338,9 @@ impl RulesPanel {
                 ui.add_space(32.0);
                 ui.label(
                     RichText::new(format!(
-                        "{}  \u{2192}  {}",
+                        "{}  {}  {}",
                         format_pattern(&spec.output_pattern),
+                        egui_phosphor::regular::ARROW_RIGHT,
                         format_pattern(&spec.input_pattern),
                     ))
                     .weak()
@@ -376,8 +377,10 @@ impl RulesPanel {
                 ui.add_space(32.0);
                 ui.label(
                     RichText::new(format!(
-                        "\u{25CB} {}  \u{2192}  ...",
-                        format_pattern(&spec.output_pattern)
+                        "{} {}  {}  ...",
+                        egui_phosphor::regular::CIRCLE,
+                        format_pattern(&spec.output_pattern),
+                        egui_phosphor::regular::ARROW_RIGHT,
                     ))
                     .color(weak_color)
                     .small(),
@@ -390,8 +393,10 @@ impl RulesPanel {
                 ui.add_space(32.0);
                 ui.label(
                     RichText::new(format!(
-                        "...  \u{2192}  \u{25CB} {}",
-                        format_pattern(&spec.input_pattern)
+                        "...  {}  {} {}",
+                        egui_phosphor::regular::ARROW_RIGHT,
+                        egui_phosphor::regular::CIRCLE,
+                        format_pattern(&spec.input_pattern),
                     ))
                     .color(weak_color)
                     .small(),
@@ -408,7 +413,7 @@ impl RulesPanel {
             ui.horizontal(|ui| {
                 ui.add_space(32.0);
                 ui.label(
-                    RichText::new(format!("{}  \u{2192}  {}", src_node, dst_node))
+                    RichText::new(format!("{}  {}  {}", src_node, egui_phosphor::regular::ARROW_RIGHT, dst_node))
                         .small()
                         .strong(),
                 );
@@ -418,13 +423,13 @@ impl RulesPanel {
             for entry in &ports {
                 ui.horizontal(|ui| {
                     ui.add_space(40.0);
-                    ui.label(RichText::new("\u{25CF}").small().color(green));
+                    ui.label(RichText::new(egui_phosphor::regular::CIRCLE).small().color(green));
                     ui.label(RichText::new(&entry.out_port).small());
-                    ui.label(RichText::new("\u{2192}").small().weak());
-                    ui.label(RichText::new("\u{25CF}").small().color(green));
+                    ui.label(RichText::new(egui_phosphor::regular::ARROW_RIGHT).small().weak());
+                    ui.label(RichText::new(egui_phosphor::regular::CIRCLE).small().color(green));
                     ui.label(RichText::new(&entry.in_port).small());
                     if entry.linked {
-                        ui.label(RichText::new("\u{2713}").small().color(green));
+                        ui.label(RichText::new(egui_phosphor::regular::CHECK).small().color(green));
                     } else {
                         ui.label(RichText::new("\u{2014}").small().color(weak_color));
                     }

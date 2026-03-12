@@ -192,7 +192,7 @@ impl NodePanel {
             // Show warning if volume control failed for this node
             if let Some(error_msg) = graph.volume_control_failed.get(&node.id) {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("⚠").color(egui::Color32::YELLOW));
+                    ui.label(egui::RichText::new(egui_phosphor::regular::WARNING).color(egui::Color32::YELLOW));
                     ui.label(egui::RichText::new(error_msg).color(egui::Color32::YELLOW).small());
                 });
             }
@@ -244,9 +244,9 @@ impl NodePanel {
 
                 for link in links {
                     let direction = if link.output_node == node.id {
-                        "→"
+                        egui_phosphor::regular::ARROW_RIGHT
                     } else {
-                        "←"
+                        egui_phosphor::regular::ARROW_LEFT
                     };
                     let other_node_id = if link.output_node == node.id {
                         link.input_node
@@ -262,14 +262,14 @@ impl NodePanel {
                     // Connection info and action buttons on same line
                     ui.horizontal(|ui| {
                         // Toggle button
-                        let toggle_text = if link.is_active { "⏸" } else { "▶" };
+                        let toggle_text = if link.is_active { egui_phosphor::regular::PAUSE } else { egui_phosphor::regular::PLAY };
                         let toggle_hint = if link.is_active { "Disable" } else { "Enable" };
                         if ui.small_button(toggle_text).on_hover_text(toggle_hint).clicked() {
                             response.toggle_link = Some((link.id, !link.is_active));
                         }
 
                         // Delete button
-                        if ui.small_button("✖").on_hover_text("Remove connection").clicked() {
+                        if ui.small_button(egui_phosphor::regular::X).on_hover_text("Remove connection").clicked() {
                             response.remove_link = Some(link.id);
                         }
 

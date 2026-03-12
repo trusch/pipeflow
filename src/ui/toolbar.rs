@@ -8,7 +8,7 @@ use crate::domain::graph::NodeLayer;
 use crate::domain::safety::{SafetyController, SafetyMode};
 use crate::ui::help_texts::help_button;
 use crate::ui::theme::Theme;
-use egui::Ui;
+use egui::{RichText, Ui};
 
 /// Toolbar component.
 pub struct Toolbar;
@@ -38,27 +38,27 @@ impl Toolbar {
             ui.separator();
 
             // Quick actions
-            Self::show_quick_actions(ui, hide_uninteresting, &mut response);
+            Self::show_quick_actions(ui, hide_uninteresting, &mut response, theme);
 
             ui.separator();
 
             // Layer visibility controls
-            Self::show_layer_controls(ui, layer_visibility, &mut response);
+            Self::show_layer_controls(ui, layer_visibility, &mut response, theme);
 
             ui.separator();
 
             // Meter controls
-            Self::show_meter_controls(ui, meter_config, &mut response);
+            Self::show_meter_controls(ui, meter_config, &mut response, theme);
 
             // Spacer
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Help button
-                if ui.button("?").clicked() {
+                if ui.button(egui_phosphor::regular::QUESTION).on_hover_text("Help (F1)").clicked() {
                     response.show_help = true;
                 }
 
                 // Settings button
-                if ui.button("Settings").clicked() {
+                if ui.button(egui_phosphor::regular::GEAR).on_hover_text("Settings").clicked() {
                     response.show_settings = true;
                 }
             });
@@ -69,13 +69,14 @@ impl Toolbar {
 
     /// Shows connection status indicator.
     fn show_connection_status(ui: &mut Ui, connection: ConnectionState, theme: &Theme) {
-        let (color, text) = match connection {
-            ConnectionState::Connected => (theme.meter.low, "[*] Connected"),
-            ConnectionState::Connecting => (theme.text.warning, "[~] Connecting..."),
-            ConnectionState::Disconnected => (theme.text.muted, "[ ] Disconnected"),
-            ConnectionState::Error => (theme.text.error, "[!] Error"),
+        let (color, icon, text) = match connection {
+            ConnectionState::Connected => (theme.meter.low, egui_phosphor::regular::WIFI_HIGH, "Connected"),
+            ConnectionState::Connecting => (theme.text.warning, egui_phosphor::regular::SPINNER, "Connecting..."),
+            ConnectionState::Disconnected => (theme.text.muted, egui_phosphor::regular::WIFI_SLASH, "Disconnected"),
+            ConnectionState::Error => (theme.text.error, egui_phosphor::regular::WARNING, "Error"),
         };
 
+        ui.label(RichText::new(icon).color(color));
         ui.colored_label(color, text);
     }
 
@@ -113,29 +114,25 @@ impl Toolbar {
     }
 
     /// Shows quick action buttons.
-    fn show_quick_actions(ui: &mut Ui, hide_uninteresting: bool, response: &mut ToolbarResponse) {
-        if ui.button("Refresh").clicked() {
+    fn show_quick_actions(ui: &mut Ui, hide_uninteresting: bool, response: &mut ToolbarResponse, theme: &Theme) {
+        if ui.button(egui_phosphor::regular::ARROWS_CLOCKWISE).on_hover_text("Refresh (R)").clicked() {
             response.refresh = true;
         }
 
-        if ui.button("Search").clicked() {
+        if ui.button(egui_phosphor::regular::MAGNIFYING_GLASS).on_hover_text("Search (Ctrl+K)").clicked() {
             response.open_search = true;
         }
 
         ui.separator();
 
         // Toggle hide uninteresting nodes
-        let hide_text = if hide_uninteresting {
-            "Show All"
+        let (icon, hover_text) = if hide_uninteresting {
+            (egui_phosphor::regular::EYE_SLASH, "Show all nodes (currently hiding uninteresting)")
         } else {
-            "Hide Boring"
+            (egui_phosphor::regular::EYE, "Hide uninteresting nodes")
         };
-        let hover_text = if hide_uninteresting {
-            "Show all nodes including those marked as uninteresting"
-        } else {
-            "Hide nodes marked as uninteresting"
-        };
-        if ui.button(hide_text).on_hover_text(hover_text).clicked() {
+        let icon_color = if hide_uninteresting { theme.text.muted } else { theme.text.primary };
+        if ui.button(RichText::new(icon).color(icon_color)).on_hover_text(hover_text).clicked() {
             response.toggle_hide_uninteresting = true;
         }
     }
@@ -145,16 +142,20 @@ impl Toolbar {
         ui: &mut Ui,
         meter_config: &MeterConfig,
         response: &mut ToolbarResponse,
+        theme: &Theme,
     ) {
         ui.horizontal(|ui| {
             // Meter toggle
-            let meter_text = if meter_config.enabled {
-                "Meters: On"
+            let meter_color = if meter_config.enabled {
+                theme.text.accent
             } else {
-                "Meters: Off"
+                theme.text.muted
             };
 
-            if ui.button(meter_text).clicked() {
+            if ui.button(RichText::new(egui_phosphor::regular::CHART_BAR).color(meter_color))
+                .on_hover_text("Toggle meters")
+                .clicked()
+            {
                 response.toggle_meters = true;
             }
 
@@ -184,49 +185,28 @@ impl Toolbar {
         ui: &mut Ui,
         layer_visibility: &LayerVisibility,
         response: &mut ToolbarResponse,
+        theme: &Theme,
     ) {
         ui.horizontal(|ui| {
-            ui.label("Layers:");
+            // Helper to draw a pill-style toggle
+            let pill = |ui: &mut Ui, label: &str, active: bool, layer: NodeLayer| -> bool {
+                let text = if active {
+                    RichText::new(label).strong().color(theme.text.accent)
+                } else {
+                    RichText::new(label).color(theme.text.muted)
+                };
+                let resp = ui.selectable_label(active, text)
+                    .on_hover_text(format!("{}: {}", layer.display_name(), layer.description()));
+                resp.clicked()
+            };
 
-            // Hardware layer toggle
-            let hw_text = if layer_visibility.hardware { "[HW]" } else { " HW " };
-            if ui
-                .button(hw_text)
-                .on_hover_text(format!(
-                    "{}: {}",
-                    NodeLayer::Hardware.display_name(),
-                    NodeLayer::Hardware.description()
-                ))
-                .clicked()
-            {
+            if pill(ui, "HW", layer_visibility.hardware, NodeLayer::Hardware) {
                 response.toggle_layer = Some(NodeLayer::Hardware);
             }
-
-            // PipeWire layer toggle
-            let pw_text = if layer_visibility.pipewire { "[PW]" } else { " PW " };
-            if ui
-                .button(pw_text)
-                .on_hover_text(format!(
-                    "{}: {}",
-                    NodeLayer::Pipewire.display_name(),
-                    NodeLayer::Pipewire.description()
-                ))
-                .clicked()
-            {
+            if pill(ui, "PW", layer_visibility.pipewire, NodeLayer::Pipewire) {
                 response.toggle_layer = Some(NodeLayer::Pipewire);
             }
-
-            // Session layer toggle
-            let sm_text = if layer_visibility.session { "[SM]" } else { " SM " };
-            if ui
-                .button(sm_text)
-                .on_hover_text(format!(
-                    "{}: {}",
-                    NodeLayer::Session.display_name(),
-                    NodeLayer::Session.description()
-                ))
-                .clicked()
-            {
+            if pill(ui, "SM", layer_visibility.session, NodeLayer::Session) {
                 response.toggle_layer = Some(NodeLayer::Session);
             }
         });
