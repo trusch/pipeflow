@@ -6,12 +6,12 @@
   },
   "groups_overview": {
     "title": "Grouping Nodes",
-    "content": "Groups help you organize related nodes together. Think of them like folders for your audio devices!\n\nWhen nodes are in a group:\n• They're visually highlighted with the same color\n• They move together when you drag one\n• You can collapse them to reduce clutter\n\nPerfect for keeping your setup tidy!",
-    "tip": "Press G to open the Groups panel and see all your groups."
+    "content": "Groups help you organize related nodes together. Think of them like folders for your patch.\n\nWhen nodes are in a group:\n• They're visually highlighted with the same color\n• They move together when you drag one\n• You can collapse them to reduce clutter\n\nPerfect for keeping your setup tidy!",
+    "tip": "Groups live inside Patch, so you can organize structure without leaving the main routing view."
   },
   "creating_groups": {
     "title": "Creating a Group",
-    "content": "To create a group:\n\n1. Select the nodes you want to group (Shift+click or box select)\n2. Open the Groups panel (G)\n3. Click 'Create Group from Selection'\n4. Give your group a memorable name\n\nYour nodes are now a team!",
+    "content": "To create a group:\n\n1. Select the nodes you want to group (Shift+click or box select)\n2. Use Ctrl+G or click 'Create Group from Selection'\n3. Give your group a memorable name\n\nYour nodes are now a team!",
     "tip": "Good group names describe the purpose: 'Streaming Setup', 'Music Production', 'Voice Chat'"
   },
   "group_colors": {
@@ -31,7 +31,7 @@
   },
   "managing_groups": {
     "title": "Managing Groups",
-    "content": "From the Groups panel you can:\n\n• See all your groups and their members\n• Add more nodes to existing groups\n• Remove nodes from groups\n• Delete entire groups (nodes stay, just ungrouped)\n• Expand or collapse group views",
+    "content": "From Patch you can:\n\n• See all your groups and their members\n• Add more nodes to existing groups\n• Remove nodes from groups\n• Delete entire groups (nodes stay, just ungrouped)\n• Expand or collapse group views",
     "tip": "Deleting a group doesn't delete the nodes - it just removes the organizational container."
   }
 }

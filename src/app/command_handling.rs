@@ -167,8 +167,15 @@ impl PipeflowApp {
         let mut needs_redo = false;
         let mut needs_open_palette = false;
         let mut needs_auto_layout = false;
+        let mut needs_create_group = false;
 
         ctx.input(|input| {
+            // Ctrl+K / Ctrl+P - Open command palette
+            if (input.key_pressed(egui::Key::K) || input.key_pressed(egui::Key::P))
+                && input.modifiers.command
+            {
+                needs_open_palette = true;
+            }
             // Ctrl+Z - Undo
             if input.key_pressed(egui::Key::Z) && input.modifiers.command && !input.modifiers.shift
             {
@@ -241,9 +248,18 @@ impl PipeflowApp {
                 needs_open_palette = true;
             }
 
-            // Ctrl+L - Auto-layout
-            if input.key_pressed(egui::Key::L) && input.modifiers.command {
+            // Ctrl+L or Ctrl+Shift+R - Auto-layout
+            if (input.key_pressed(egui::Key::L) && input.modifiers.command)
+                || (input.key_pressed(egui::Key::R)
+                    && input.modifiers.command
+                    && input.modifiers.shift)
+            {
                 needs_auto_layout = true;
+            }
+
+            // Ctrl+G - Create group from selection
+            if input.key_pressed(egui::Key::G) && input.modifiers.command {
+                needs_create_group = true;
             }
         });
 
@@ -253,6 +269,9 @@ impl PipeflowApp {
 
         if needs_auto_layout {
             self.perform_auto_layout(false);
+        }
+        if needs_create_group {
+            self.handle_ui_command(UiCommand::CreateGroupFromSelection(None));
         }
 
         // Execute undo/redo outside the input closure (needs &mut self)

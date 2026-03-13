@@ -6,7 +6,7 @@ Pipeflow includes a safety system designed to prevent accidental changes during 
 
 ### Normal Mode
 
-Full control with no restrictions. You can create and remove connections, adjust volumes, reorganize nodes, and modify any aspect of the graph.
+Full control with no restrictions. You can create and remove connections, adjust volumes, organize the patch, and modify any aspect of the graph.
 
 Use for: initial setup, experimenting, daily desktop audio management.
 
@@ -18,7 +18,7 @@ Use for: monitoring a working setup, showing your configuration to someone, prev
 
 ### Stage Mode
 
-Maximum protection for live performance. Stage mode blocks all routing and volume changes. The UI reflects stage mode clearly so you won't accidentally think you're in normal mode.
+Maximum protection for live performance. Stage mode blocks routing and volume changes. The top bar and safety card make stage mode obvious so you won't accidentally think you're back in Normal.
 
 Mute toggles remain available in all modes as a safety valve.
 
@@ -26,8 +26,10 @@ Use for: live performance, important recording sessions, any situation where an 
 
 ## Switching Modes
 
-- **Toolbar dropdown**: The safety mode selector is in the main toolbar
-- **Command palette**: Open with `Ctrl+K` and search for "Read-Only"
+- **Toolbar safety card**: Shows the current mode, what it blocks, and lets you switch quickly
+- **Command palette**: Open with `Ctrl+K`, `Ctrl+P`, or `/` and search for `Normal`, `Read-Only`, or `Stage`
+
+If an action is blocked, Pipeflow explains what was prevented and reminds you to switch back to Normal if you want to edit.
 
 ## Recommendations
 
@@ -37,16 +39,16 @@ Normal mode is fine for most workflows.
 
 ### Recording Sessions
 
-Read-only mode. You don't want to accidentally disconnect a microphone mid-take. Set up your routing first, switch to read-only, then record.
+Read-Only mode. You don't want to accidentally disconnect a microphone mid-take. Set up your routing first, switch to Read-Only, then record.
 
 ### Live Performance
 
-Stage mode. Set up and test everything in normal mode during soundcheck, save a snapshot, then switch to stage mode before the show starts.
+Stage mode. Set up and test everything in Normal during soundcheck, save a setup, then switch to Stage before the show starts.
 
 ### Workflow
 
 1. **Setup**: Normal mode — connect everything, adjust levels, position nodes
-2. **Test**: Verify audio flows correctly, save a snapshot
-3. **Lock**: Switch to appropriate safety mode for the session
-4. **Perform/Record**: Work with confidence
-5. **Teardown**: Back to normal mode if needed
+2. **Test**: Verify audio flows correctly, save a setup
+3. **Protect**: Switch to the appropriate safety mode for the session
+4. **Perform / Record**: Work with confidence
+5. **Edit again**: Return to Normal when you need to change routing or volume

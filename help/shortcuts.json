@@ -6,23 +6,23 @@
   },
   "shortcuts_overview": {
     "title": "Keyboard Shortcuts",
-    "content": "Pipeflow is designed for quick keyboard access. Learn these shortcuts and you'll fly through your audio routing!\n\nMost shortcuts are single keys - no modifier needed. This keeps things fast and accessible.",
+    "content": "Pipeflow is designed for quick keyboard access. Learn these shortcuts and you'll move through your patch much faster.\n\nMost high-frequency controls stay close to your left hand so you can keep routing without hunting through menus.",
     "tip": "Press H anytime to see the full shortcut reference."
   },
   "panel_shortcuts": {
-    "title": "Panel Shortcuts",
-    "content": "Toggle panels on and off:\n\n• H - Help panel (this one!)\n• I - Inspector (node details)\n• F - Filters panel\n• G - Groups panel\n• S - Snapshots panel\n\nPanels appear on the sides so they don't cover your graph.",
-    "tip": "Press the same key again to close a panel."
+    "title": "Panels & Navigation",
+    "content": "Open the surfaces you use most:\n\n• H - Help\n• I - Inspector\n• , - Settings\n• [ - Toggle left navigation\n• ] - Toggle right sidebar\n\nUse the left navigation to move between Patch, Auto Connect, and Saved Setups.",
+    "tip": "If the layout feels crowded, hide a sidebar and bring it back when you need it."
   },
   "view_shortcuts": {
     "title": "View Shortcuts",
-    "content": "Navigate and zoom:\n\n• +/= - Zoom in\n• - - Zoom out\n• Ctrl+0 - Reset view (fit all)\n• Ctrl+Shift+R - Smart reorganize",
+    "content": "Navigate and organize:\n\n• +/= - Zoom in\n• - - Zoom out\n• Ctrl+0 - Fit all\n• Ctrl+L or Ctrl+Shift+R - Organize patch",
     "tip": "Mouse scroll wheel also zooms in and out!"
   },
   "safety_shortcuts": {
     "title": "Safety Shortcuts",
-    "content": "Stay safe:\n\n• Space or F9 - PANIC! Mute everything\n• Ctrl+L - Toggle routing lock\n\nThe panic shortcut is designed to be easy to hit in an emergency!",
-    "tip": "Space is the biggest key on your keyboard - easy to find when your ears are hurting!"
+    "content": "Stay safe:\n\n• Space or F9 - PANIC! Mute everything\n\nSafety mode switches live in the toolbar and command palette so the current protection state stays visible.",
+    "tip": "The panic shortcut is designed to be easy to hit in an emergency."
   },
   "selection_shortcuts": {
     "title": "Selection Shortcuts",
@@ -31,7 +31,7 @@
   },
   "command_palette": {
     "title": "Command Palette",
-    "content": "The ultimate power tool:\n\n• Ctrl+K or Ctrl+P - Open command palette\n\nType to fuzzy-search through all commands. Arrow keys to navigate, Enter to execute.\n\nEvery action in Pipeflow is available here!",
-    "tip": "Forgot a shortcut? Open the command palette and search for what you want to do."
+    "content": "The ultimate power tool:\n\n• Ctrl+K or Ctrl+P - Open command palette\n• / - Quick open command search\n\nType to fuzzy-search through all commands. Arrow keys to navigate, Enter to execute.\n\nEvery action in Pipeflow is available here!",
+    "tip": "Forgot where something moved? Open the command palette and search with either the new or old name."
   }
 }

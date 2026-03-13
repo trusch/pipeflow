@@ -6,8 +6,8 @@
   },
   "graph_navigation": {
     "title": "Getting Around",
-    "content": "Navigate your audio graph like a pro:\n\n🖱️ Pan - Drag on empty space to move the view\n🔍 Zoom - Scroll wheel or +/- keys\n🎯 Reset - Press Ctrl+0 to fit everything in view\n\nThe graph can be as big as you need - just pan and zoom to explore!",
-    "tip": "Lost in a big graph? Ctrl+0 instantly shows you everything."
+    "content": "Navigate your patch like a pro:\n\n🖱️ Pan - Drag on empty space to move the view\n🔍 Zoom - Scroll wheel or +/- keys\n🎯 Fit All - Press Ctrl+0 to frame the full patch\n\nThe graph can be as big as you need - just pan and zoom to explore!",
+    "tip": "Lost in a big patch? Ctrl+0 instantly brings everything back into view."
   },
   "selecting_nodes": {
     "title": "Selecting Nodes",
@@ -15,14 +15,14 @@
     "tip": "Selected nodes show their details in the Inspector panel (press I)."
   },
   "smart_reorganize": {
-    "title": "Smart Reorganize ✨",
-    "content": "Press Ctrl+Shift+R for automatic layout magic! Smart Reorganize:\n\n• Arranges nodes in a logical flow (inputs → outputs)\n• Minimizes connection crossings\n• Spaces nodes evenly\n• Keeps groups together\n• Moves 'uninteresting' nodes to the edges",
-    "tip": "New to a messy graph? Smart Reorganize is your first step to clarity."
+    "title": "Organize Patch ✨",
+    "content": "Press Ctrl+Shift+R for automatic layout magic! Organize Patch:\n\n• Arranges nodes in a logical flow (inputs → outputs)\n• Minimizes connection crossings\n• Spaces nodes evenly\n• Keeps groups together\n• Moves background nodes to the edges",
+    "tip": "New to a messy patch? Organize Patch is your first step back to clarity."
   },
   "snap_to_grid": {
     "title": "Snap to Grid",
-    "content": "Enable Snap to Grid for clean, aligned layouts. When enabled:\n\n• Nodes align to an invisible grid when moved\n• Everything lines up nicely\n• Your graph looks organized and professional\n\nFind the toggle in the toolbar or use the context menu.",
-    "tip": "Snap to Grid + Smart Reorganize = instant organization!"
+    "content": "Enable Snap to Grid for clean, aligned layouts. When enabled:\n\n• Nodes align to an invisible grid when moved\n• Everything lines up nicely\n• Your patch looks organized and professional\n\nFind the toggle in the View menu or use the context menu.",
+    "tip": "Snap to Grid + Organize Patch = instant organization!"
   },
   "spacing_controls": {
     "title": "Adjusting Spacing",
@@ -30,13 +30,13 @@
     "tip": "More spacing makes connections easier to follow; less spacing fits more on screen."
   },
   "uninteresting_nodes": {
-    "title": "Marking Nodes as Uninteresting",
-    "content": "Some nodes you just don't care about (system internals, rarely-used devices). Mark them as 'uninteresting' and:\n\n• They'll be moved to the edges during reorganization\n• They'll have reduced visual prominence\n• They won't clutter your main working area\n\nRight-click a node and choose 'Mark as Uninteresting'.",
-    "tip": "Monitors, dummy sinks, and PipeWire internals are good candidates for 'uninteresting'."
+    "title": "Background Nodes",
+    "content": "Some nodes don't need to stay front-and-center (system internals, utility devices, rarely-used endpoints). Mark them as background and:\n\n• They'll be moved to the edges during reorganization\n• They'll have reduced visual prominence\n• They won't clutter your main working area\n\nRight-click a node and choose 'Mark as Background'.",
+    "tip": "Monitors, dummy sinks, and PipeWire internals are good candidates for the background."
   },
   "context_menus": {
     "title": "Context Menus",
-    "content": "Right-click for context-sensitive options:\n\nOn empty space:\n• View options, layout controls, paste\n\nOn a node:\n• Node actions, grouping, interesting toggle\n\nOn a link:\n• Remove connection, toggle enabled state",
+    "content": "Right-click for context-sensitive options:\n\nOn empty space:\n• View options, layout controls, paste\n\nOn a node:\n• Node actions, grouping, background controls\n\nOn a link:\n• Remove connection, toggle enabled state",
     "tip": "When in doubt, right-click! Most actions are just a click away."
   }
 }

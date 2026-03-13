@@ -5,33 +5,33 @@
     "version": "1.0.0"
   },
   "snapshots_overview": {
-    "title": "Snapshots - Your Audio Time Machine",
-    "content": "Snapshots let you save your current setup and restore it later. It's like a 'save game' for your audio configuration!\n\nPerfect for:\n• Switching between different setups (work, music, gaming)\n• Experimenting without fear\n• Quickly restoring a known-good configuration",
-    "tip": "Press S to open the Snapshots panel. Save often, restore confidently!"
+    "title": "Saved Setups — Your Trusted Recall List",
+    "content": "Saved Setups let you capture your current patch and bring it back later. Think of them as trusted recall points for your audio configuration.\n\nPerfect for:\n• Switching between different setups (work, music, gaming)\n• Experimenting without fear\n• Quickly getting back to a known-good patch",
+    "tip": "Press S to jump to Saved Setups in the left navigation. Save before big changes, restore when you want to get back on track."
   },
   "what_gets_saved": {
     "title": "What Gets Saved?",
-    "content": "A snapshot captures:\n\n🔗 Connections - Which nodes are wired to which\n🔊 Volumes - All volume levels and mute states\n📍 Positions - Where nodes are placed on the graph\n\nBasically, everything you'd need to recreate your exact setup!",
-    "tip": "Snapshots are stored locally - they persist even after closing Pipeflow."
+    "content": "A saved setup captures:\n\n🔗 Connections - Which nodes are wired to which\n🔊 Volumes - All volume levels and mute states\n📍 Positions - Where nodes are placed on the graph\n\nBasically, everything you'd need to recreate your exact setup!",
+    "tip": "Saved setups are stored locally - they persist even after closing Pipeflow."
   },
   "creating_snapshots": {
-    "title": "Creating a Snapshot",
-    "content": "To save your current setup:\n\n1. Open the Snapshots panel (S)\n2. Click 'Save Snapshot'\n3. Give it a descriptive name\n\nThe snapshot is saved immediately with the current timestamp.",
+    "title": "Saving a Setup",
+    "content": "To save your current setup:\n\n1. Open Saved Setups (S)\n2. Click 'Save Setup'\n3. Give it a descriptive name\n\nThe setup is saved immediately with the current timestamp.",
     "tip": "Use descriptive names like 'Streaming Setup v2' or 'Recording Session 2024-01' - future you will thank you!"
   },
   "restoring_snapshots": {
-    "title": "Restoring a Snapshot",
-    "content": "To restore a saved setup:\n\n1. Open the Snapshots panel (S)\n2. Find the snapshot you want\n3. Click 'Restore'\n\nPipeflow will recreate the connections and settings as best it can.\n\nNote: If some nodes no longer exist (apps closed, devices unplugged), those connections will be skipped.",
-    "tip": "Restoring only affects nodes that exist - it won't launch applications for you."
+    "title": "Restoring a Saved Setup",
+    "content": "To restore a saved setup:\n\n1. Open Saved Setups (S)\n2. Find the setup you want\n3. Click 'Restore'\n\nPipeflow will recreate the connections and settings as best it can.\n\nNote: If some nodes no longer exist (apps closed, devices unplugged), those connections will be skipped.",
+    "tip": "Restore only affects nodes that exist - it won't launch applications for you."
   },
   "partial_restore": {
     "title": "Smart Matching",
-    "content": "When you restore, Pipeflow intelligently matches nodes:\n\n• It looks for nodes with the same name and type\n• If an exact match isn't found, it tries similar matches\n• Unmatched connections are skipped (no errors!)\n\nThis means snapshots work even when your system changes a bit.",
+    "content": "When you restore, Pipeflow intelligently matches nodes:\n\n• It looks for nodes with the same name and type\n• If an exact match isn't found, it tries similar matches\n• Unmatched connections are skipped (no errors!)\n\nThis means saved setups still work even when your system changes a bit.",
     "tip": "Node IDs change when apps restart - that's why Pipeflow matches by name and type instead."
   },
   "snapshot_management": {
-    "title": "Managing Snapshots",
-    "content": "In the Snapshots panel you can:\n\n• See all saved snapshots with timestamps\n• Preview what each snapshot contains (connections, volumes)\n• Restore any snapshot\n• Delete snapshots you no longer need\n\nSnapshots don't take much space, so keep as many as you like!",
-    "tip": "You can create multiple snapshots for the same basic setup - one for each tweak you might want."
+    "title": "Managing Saved Setups",
+    "content": "In Saved Setups you can:\n\n• See all saved setups with timestamps\n• Preview what each setup contains (connections, volumes)\n• Restore any setup\n• Delete setups you no longer need\n\nSaved setups don't take much space, so keep as many as you like!",
+    "tip": "You can create multiple saved setups for the same basic patch - one for each variation you may want later."
   }
 }

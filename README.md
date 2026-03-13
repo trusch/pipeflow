@@ -6,14 +6,14 @@ Pipeflow replaces the patchwork of Helvum, pavucontrol, and qpwgraph with a sing
 
 ## Why Pipeflow?
 
-Existing PipeWire tools are fragmented: Helvum visualizes but doesn't control, pavucontrol controls but doesn't route, qpwgraph routes but lacks safety features. Pipeflow combines all three into one cohesive application with stage-safe operation, snapshot presets, and remote control.
+Existing PipeWire tools are fragmented: Helvum visualizes but doesn't control, pavucontrol controls but doesn't route, qpwgraph routes but lacks safety features. Pipeflow combines all three into one cohesive application with stage-safe operation, saved setup recall, and remote control.
 
 ## Features
 
 - **Visual graph editing** — Interactive node graph with pan, zoom, drag, and multi-select
 - **Full audio control** — Per-node and per-channel volume, mute, live signal metering with peak/RMS display
 - **Link management** — Create and remove connections between compatible ports
-- **Snapshots** — Save and restore graph configurations
+- **Saved setups** — Save and restore trusted graph configurations
 - **Command palette** — Fuzzy-searchable keyboard command interface (`Ctrl+K`)
 - **Safety modes** — Normal, read-only, and stage mode to prevent accidental changes
 - **Filtering & groups** — Filter by media class, direction, or activity; organize nodes into groups
@@ -87,12 +87,12 @@ pipeflow -v       # Launch with verbose logging
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+K` / `Ctrl+P` | Command palette |
+| `Ctrl+K` / `Ctrl+P` / `/` | Command palette |
 | `H` | Toggle help panel |
 | `I` | Toggle inspector |
-| `[` / `]` | Decrease / increase spacing |
+| `[` / `]` | Toggle left / right sidebar |
 | `+` / `-` | Zoom in / out |
-| `Ctrl+0` | Reset view (fit all) |
+| `Ctrl+0` | Fit all |
 | `Ctrl+G` | Create group from selection |
 | `Delete` | Remove selected links |
 | `Escape` | Clear selection / close palette |
@@ -113,7 +113,7 @@ Pipeflow includes protection modes to prevent accidental changes:
 - **Read-only mode** — Observe without risk of changes
 - **Stage mode** — Maximum protection for live performance (blocks all routing and volume changes)
 
-Switch modes via the toolbar dropdown or the command palette.
+Switch modes from the toolbar safety card or the command palette.
 
 See [docs/SAFETY.md](docs/SAFETY.md) for detailed guidance on when to use each mode.
 
@@ -171,7 +171,7 @@ Key design decisions:
 
 - [Remote Control Guide](docs/REMOTE.md) — Headless mode, SSH tunnels, gRPC protocol
 - [Safety & Stage Modes](docs/SAFETY.md) — Protection modes for live and recording use
-- [Snapshots & Presets](docs/SNAPSHOTS.md) — Saving and restoring graph configurations
+- [Saved Setups & Recall](docs/SNAPSHOTS.md) — Saving and restoring trusted graph configurations
 - [Requirements](docs/REQUIREMENTS.md) — Product requirements document
 
 ## Contributing

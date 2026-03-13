@@ -6,8 +6,8 @@
   },
   "safety_overview": {
     "title": "Safety Features",
-    "content": "Pipeflow has your back! Whether you're performing live or just experimenting, our safety features help prevent audio disasters.\n\nThe safety system has three pillars:\n• Safety Modes - control what changes are allowed\n• Panic Button - instant mute for emergencies\n• Routing Lock - freeze your connections",
-    "tip": "Live performers: Check out Stage Mode for maximum protection during shows!"
+    "content": "Pipeflow is built to keep live routing calm and recoverable. The safety system has two always-visible pillars:\n• Safety Modes - control what changes are allowed\n• Panic Button - instant mute for emergencies\n\nThe toolbar keeps the current mode in view so you can tell your safety state at a glance.",
+    "tip": "Before a show or recording pass, check the safety card in the toolbar and make sure you're in the mode you expect."
   },
   "panic_button": {
     "title": "🚨 Panic Button",
@@ -16,22 +16,22 @@
   },
   "safety_mode_normal": {
     "title": "Normal Mode",
-    "content": "In Normal mode, you have full control! You can:\n\n• Create and remove connections\n• Adjust volumes\n• Reorganize nodes\n• Do anything you need\n\nThis is the default mode for everyday use and experimentation.",
-    "tip": "Normal mode is great for setup and experimenting, but consider Read-Only or Stage mode for important sessions."
+    "content": "In Normal mode, you have full control. You can:\n\n• Create and remove connections\n• Adjust volumes\n• Organize the patch\n• Make any changes you need\n\nThis is the default mode for everyday setup and experimentation.",
+    "tip": "Normal mode is great for setup work. Switch to Read-Only or Stage once the patch is where you want it."
   },
   "safety_mode_readonly": {
     "title": "Read-Only Mode",
-    "content": "Read-Only mode lets you observe without risking changes. Perfect for:\n\n• Monitoring a working setup\n• Showing someone your configuration\n• Preventing accidental modifications\n\nYou can still look around, select things, and view details - you just can't change anything.",
-    "tip": "Think of Read-Only as 'museum mode' - look but don't touch!"
+    "content": "Read-Only mode lets you observe without risking changes. Perfect for:\n\n• Monitoring a working setup\n• Showing someone your configuration\n• Preventing accidental modifications\n\nYou can still look around, select things, and inspect details - you just can't change routing or volume.",
+    "tip": "Think of Read-Only as 'look around safely'."
   },
   "safety_mode_stage": {
     "title": "Stage Mode 🎤",
-    "content": "Stage Mode is your live performance guardian! It combines:\n\n• Read-Only protection (no accidental changes)\n• Routing Lock (connections stay put)\n• Enhanced panic button visibility\n• Extra confirmation for any changes\n\nUse this when you're performing live or recording something important.",
-    "tip": "Stage Mode makes the panic button extra prominent - because in a live situation, you need to find it FAST."
+    "content": "Stage mode is your live-session guardrail. It keeps the current patch stable by blocking routing and volume changes while leaving mute available for emergencies.\n\nUse this when you're performing live or recording something important.",
+    "tip": "If an action is blocked in Stage mode, the status feedback tells you what was blocked and reminds you to switch back to Normal if you need to edit."
   },
   "routing_lock": {
-    "title": "Routing Lock 🔒",
-    "content": "Routing Lock freezes your connections in place. With it enabled:\n\n• No new connections can be made\n• Existing connections can't be removed\n• You can still adjust volumes and move nodes\n\nIt's perfect when you've got your routing just right and want to protect it while still tweaking levels.",
-    "tip": "Routing Lock + Normal Mode = You can adjust volumes but can't accidentally disconnect anything."
+    "title": "Safety Card in the Toolbar",
+    "content": "The toolbar safety card shows your current mode, what it means, and lets you switch modes without digging through settings.\n\nThis makes safety feel like part of the environment instead of a hidden preference.",
+    "tip": "If you're about to make a change and the toolbar says Read-Only or Stage, switch back to Normal first."
   }
 }

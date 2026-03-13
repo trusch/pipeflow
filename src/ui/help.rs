@@ -147,15 +147,15 @@ impl HelpPanel {
                     .num_columns(2)
                     .spacing([20.0, 4.0])
                     .show(ui, |ui| {
-                        Self::shortcut_row(ui, "Ctrl+K / Ctrl+P", "Open command palette");
+                        Self::shortcut_row(ui, "Ctrl+K / Ctrl+P / /", "Open command palette");
                         Self::shortcut_row(ui, "Space / F9", "Panic mute (emergency!)");
                         Self::shortcut_row(ui, "Escape", "Clear selection");
                         Self::shortcut_row(ui, "Delete / Backspace", "Remove selected link");
-                        Self::shortcut_row(ui, "H", "Toggle help panel");
-                        Self::shortcut_row(ui, "F", "Toggle filter panel");
-                        Self::shortcut_row(ui, "G", "Toggle groups panel");
-                        Self::shortcut_row(ui, "I", "Toggle inspector panel");
-                        Self::shortcut_row(ui, "S", "Toggle Saved Setups panel");
+                        Self::shortcut_row(ui, "H", "Toggle help");
+                        Self::shortcut_row(ui, "I", "Toggle inspector");
+                        Self::shortcut_row(ui, ",", "Toggle settings");
+                        Self::shortcut_row(ui, "[ / ]", "Toggle left / right sidebar");
+                        Self::shortcut_row(ui, "Ctrl+G", "Create group from selection");
                         Self::shortcut_row(ui, "+/-", "Zoom in/out");
                         Self::shortcut_row(ui, "Ctrl+0", "Reset zoom / fit all");
                         Self::shortcut_row(ui, "Ctrl+Shift+R", "Smart reorganize layout");
@@ -247,7 +247,7 @@ impl HelpPanel {
         help_section(
             ui,
             "snapshots",
-            "Snapshots",
+            "Saved Setups",
             &[
                 "snapshots_overview",
                 "what_gets_saved",
@@ -261,7 +261,7 @@ impl HelpPanel {
         help_section(
             ui,
             "graph",
-            "Graph Layout",
+            "Patch Layout",
             &["smart_reorganize", "snap_to_grid", "uninteresting_nodes"],
             false,
         );
