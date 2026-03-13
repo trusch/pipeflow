@@ -268,83 +268,72 @@ impl PipeflowApp {
     pub(super) fn handle_command_action(&mut self, action: CommandAction) {
         match action {
             CommandAction::Ui(cmd) => self.handle_ui_command(cmd),
-            CommandAction::Custom(name) => {
-                match name.as_str() {
-                    "zoom_in" => {
-                        self.components.graph_view.zoom =
-                            (self.components.graph_view.zoom * 1.2).min(3.0);
-                    }
-                    "zoom_out" => {
-                        self.components.graph_view.zoom =
-                            (self.components.graph_view.zoom / 1.2).max(0.1);
-                    }
-                    "reset_view" => {
-                        self.components.graph_view.reset_view();
-                    }
-                    "increase_spacing" => {
-                        self.config.ui.grid_spacing = (self.config.ui.grid_spacing + 5.0).min(50.0);
-                    }
-                    "decrease_spacing" => {
-                        self.config.ui.grid_spacing = (self.config.ui.grid_spacing - 5.0).max(10.0);
-                    }
-                    "toggle_help" => {
-                        self.components.show_help = !self.components.show_help;
-                    }
-                    "toggle_inspector" => {
-                        self.components.show_inspector = !self.components.show_inspector;
-                    }
-                    "toggle_settings" => {
-                        self.components.show_settings = !self.components.show_settings;
-                    }
-                    "toggle_left_sidebar" => {
-                        self.components.left_sidebar.toggle();
-                    }
-                    "toggle_right_sidebar" => {
-                        self.components.right_sidebar.toggle();
-                    }
-                    "save_snapshot" => {
-                        // Quick-save snapshot with auto-generated name
-                        let name = format!(
-                            "Setup {}",
-                            self.components.snapshot_manager.list().len() + 1
-                        );
-                        let state = self.state.read();
-                        let result = self.components.snapshot_manager.capture(
-                            name.clone(),
-                            &state.graph,
-                            create_stable_identifier,
-                        );
-                        drop(state);
-                        match result {
-                            Ok(_) => {
-                                self.components.status_message = Some((
-                                    format!("Saved setup '{}' created", name),
-                                    std::time::Instant::now(),
-                                    false,
-                                ));
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to save snapshot: {}", e);
-                            }
+            CommandAction::Custom(name) => match name.as_str() {
+                "zoom_in" => {
+                    self.components.graph_view.zoom =
+                        (self.components.graph_view.zoom * 1.2).min(3.0);
+                }
+                "zoom_out" => {
+                    self.components.graph_view.zoom =
+                        (self.components.graph_view.zoom / 1.2).max(0.1);
+                }
+                "reset_view" => {
+                    self.components.graph_view.reset_view();
+                }
+                "increase_spacing" => {
+                    self.config.ui.grid_spacing = (self.config.ui.grid_spacing + 5.0).min(50.0);
+                }
+                "decrease_spacing" => {
+                    self.config.ui.grid_spacing = (self.config.ui.grid_spacing - 5.0).max(10.0);
+                }
+                "toggle_help" => {
+                    self.components.show_help = !self.components.show_help;
+                }
+                "toggle_inspector" => {
+                    self.components.show_inspector = !self.components.show_inspector;
+                }
+                "toggle_settings" => {
+                    self.components.show_settings = !self.components.show_settings;
+                }
+                "toggle_left_sidebar" => {
+                    self.components.left_sidebar.toggle();
+                }
+                "toggle_right_sidebar" => {
+                    self.components.right_sidebar.toggle();
+                }
+                "save_snapshot" => {
+                    let state = self.state.read();
+                    let result = self
+                        .components
+                        .snapshot_manager
+                        .capture_quick_save(&state.graph, create_stable_identifier);
+                    drop(state);
+                    match result {
+                        Ok(_) => {
+                            self.resolve_persistent_issue("saved-setup-save-failed");
+                            self.set_status_message("Saved a quick fallback scene", false);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to save quick scene: {}", e);
                         }
                     }
-                    "undo" => {
-                        self.perform_undo();
-                    }
-                    "redo" => {
-                        self.perform_redo();
-                    }
-                    "auto_layout" => {
-                        self.perform_auto_layout(false);
-                    }
-                    "auto_layout_selected" => {
-                        self.perform_auto_layout(true);
-                    }
-                    _ => {
-                        tracing::warn!("Unknown custom command: {}", name);
-                    }
                 }
-            }
+                "undo" => {
+                    self.perform_undo();
+                }
+                "redo" => {
+                    self.perform_redo();
+                }
+                "auto_layout" => {
+                    self.perform_auto_layout(false);
+                }
+                "auto_layout_selected" => {
+                    self.perform_auto_layout(true);
+                }
+                _ => {
+                    tracing::warn!("Unknown custom command: {}", name);
+                }
+            },
             CommandAction::GoToNode(node_id) => {
                 self.handle_ui_command(UiCommand::SelectNode(node_id));
                 let state = self.state.read();

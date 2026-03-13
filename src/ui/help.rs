@@ -155,7 +155,7 @@ impl HelpPanel {
                         Self::shortcut_row(ui, "F", "Toggle filter panel");
                         Self::shortcut_row(ui, "G", "Toggle groups panel");
                         Self::shortcut_row(ui, "I", "Toggle inspector panel");
-                        Self::shortcut_row(ui, "S", "Toggle snapshots panel");
+                        Self::shortcut_row(ui, "S", "Toggle Saved Setups panel");
                         Self::shortcut_row(ui, "+/-", "Zoom in/out");
                         Self::shortcut_row(ui, "Ctrl+0", "Reset zoom / fit all");
                         Self::shortcut_row(ui, "Ctrl+Shift+R", "Smart reorganize layout");
