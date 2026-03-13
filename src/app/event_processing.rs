@@ -147,6 +147,8 @@ impl PipeflowApp {
         let mut state = self.state.write();
         let mut should_start_meters = false;
         let mut volume_changed = false;
+        let mut volume_control_issues: Vec<(crate::util::id::NodeId, String)> = Vec::new();
+        let mut resolved_volume_issue_nodes: Vec<crate::util::id::NodeId> = Vec::new();
 
         for event in events {
             match event {
@@ -207,6 +209,7 @@ impl PipeflowApp {
                     }
                     state.graph.remove_node(&id);
                     state.ui.cleanup_removed_node(&id);
+                    resolved_volume_issue_nodes.push(id);
                 }
                 PwEvent::PortAdded(info) => {
                     let node_id = info.node_id;
@@ -253,6 +256,7 @@ impl PipeflowApp {
                     if let Some(ident) = identifier {
                         state.ui.persist_volume(&ident, volume);
                         volume_changed = true;
+                        resolved_volume_issue_nodes.push(node_id);
                     }
                 }
                 PwEvent::MuteChanged(node_id, muted) => {
@@ -272,11 +276,13 @@ impl PipeflowApp {
                         if let Some(ident) = identifier {
                             state.ui.persist_volume(&ident, vol);
                             volume_changed = true;
+                            resolved_volume_issue_nodes.push(node_id);
                         }
                     }
                 }
                 PwEvent::VolumeControlFailed(node_id, error_msg) => {
                     tracing::warn!("Volume control failed for {:?}: {}", node_id, error_msg);
+                    volume_control_issues.push((node_id, error_msg.clone()));
                     state.graph.volume_control_failed.insert(node_id, error_msg);
                 }
                 PwEvent::MeterUpdate(updates) => {
@@ -291,6 +297,19 @@ impl PipeflowApp {
         }
 
         drop(state);
+
+        for node_id in resolved_volume_issue_nodes {
+            self.resolve_persistent_issue(&format!("volume-control-failed-{}", node_id.raw()));
+        }
+
+        for (node_id, issue) in volume_control_issues {
+            self.push_persistent_issue(
+                format!("volume-control-failed-{}", node_id.raw()),
+                super::FeedbackLevel::Warning,
+                "Volume control is unavailable for a node",
+                Some(issue),
+            );
+        }
 
         // Flag layout save if volume state changed (so it's persisted to disk)
         if volume_changed {
