@@ -24,8 +24,8 @@ use std::thread::JoinHandle;
 
 // SPA Props key constants (from spa/param/props.h)
 // SPA_PROP_START_Audio = 0x10000
-const SPA_PROP_VOLUME: u32 = 0x10003;        // volume (Float)
-const SPA_PROP_MUTE: u32 = 0x10004;          // mute (Bool)
+const SPA_PROP_VOLUME: u32 = 0x10003; // volume (Float)
+const SPA_PROP_MUTE: u32 = 0x10004; // mute (Bool)
 const SPA_PROP_CHANNEL_VOLUMES: u32 = 0x10008; // channelVolumes (Array of Float)
 
 /// Channel bridge for communication between threads.
@@ -136,7 +136,10 @@ impl PwConnection {
                 let _ = handle.join();
                 let _ = done_tx.send(());
             });
-            if done_rx.recv_timeout(std::time::Duration::from_secs(2)).is_err() {
+            if done_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .is_err()
+            {
                 tracing::warn!("PipeWire thread did not exit within 2s, detaching");
             }
         }
@@ -264,10 +267,13 @@ fn run_pipewire_thread(
 
         // Notify about reconnection attempt
         tracing::info!("Reconnecting to PipeWire (attempt {})", attempt);
-        if event_tx.send(PwEvent::Reconnecting {
-            attempt,
-            max_attempts: 0, // 0 = unlimited
-        }).is_err() {
+        if event_tx
+            .send(PwEvent::Reconnecting {
+                attempt,
+                max_attempts: 0, // 0 = unlimited
+            })
+            .is_err()
+        {
             tracing::warn!("Failed to send Reconnecting event — receiver dropped");
         }
 
@@ -299,7 +305,8 @@ fn try_connect_and_run(
         .map_err(|e| format!("Failed to create context: {}", e))?;
 
     // Connect to the PipeWire daemon
-    let core = context.connect(None)
+    let core = context
+        .connect(None)
         .map_err(|e| format!("Failed to connect to PipeWire: {}", e))?;
 
     tracing::info!("Connected to PipeWire");
@@ -308,8 +315,10 @@ fn try_connect_and_run(
     }
 
     // Get the registry (wrapped in Rc for sharing with callbacks)
-    let registry = Rc::new(core.get_registry()
-        .map_err(|e| format!("Failed to get registry: {}", e))?);
+    let registry = Rc::new(
+        core.get_registry()
+            .map_err(|e| format!("Failed to get registry: {}", e))?,
+    );
 
     // Runtime state for tracking created objects
     let state = Rc::new(RefCell::new(PwRuntimeState::new()));
@@ -341,29 +350,40 @@ fn try_connect_and_run(
                         tracing::trace!("Skipping our own meter node: {}", node_name);
                     } else {
                         // Only process audio-related nodes
-                        let is_audio = media_class.contains("Audio")
-                            || media_class.contains("Stream");
+                        let is_audio =
+                            media_class.contains("Audio") || media_class.contains("Stream");
 
                         if is_audio {
                             let node_id = NodeId::new(global.id);
 
                             // Use object.serial if available, otherwise fallback to node ID
                             // This ensures all audio nodes can be metered, even those without a serial
-                            let target_id = props.get("object.serial")
+                            let target_id = props
+                                .get("object.serial")
                                 .map(|s| s.to_string())
                                 .unwrap_or_else(|| global.id.to_string());
 
                             // Determine if this is a sink node (receives audio) vs source (outputs audio)
                             // Sinks: Audio/Sink, Stream/Input/Audio
                             // Sources: Audio/Source, Stream/Output/Audio (like SuperCollider)
-                            let is_sink = media_class.contains("Sink")
-                                || media_class.contains("Input");
+                            let is_sink =
+                                media_class.contains("Sink") || media_class.contains("Input");
 
                             // Register for metering
                             meter_manager_for_global
                                 .borrow_mut()
-                                .register_and_auto_meter(&core_for_global, node_id, target_id, is_sink);
-                            tracing::trace!("Registered audio node for metering: {} ({}, is_sink={})", node_name, media_class, is_sink);
+                                .register_and_auto_meter(
+                                    &core_for_global,
+                                    node_id,
+                                    target_id,
+                                    is_sink,
+                                );
+                            tracing::trace!(
+                                "Registered audio node for metering: {} ({}, is_sink={})",
+                                node_name,
+                                media_class,
+                                is_sink
+                            );
 
                             // Bind node proxy for volume/mute control
                             if let Some(registry) = registry_weak.upgrade() {
@@ -389,7 +409,9 @@ fn try_connect_and_run(
                 state.remove_node_proxy(&node_id);
             }
             // Clean up meter manager
-            meter_manager_for_remove.borrow_mut().unregister_node(&node_id);
+            meter_manager_for_remove
+                .borrow_mut()
+                .unregister_node(&node_id);
             handle_global_removed(&event_tx_for_remove, id);
         })
         .register();
@@ -427,7 +449,9 @@ fn try_connect_and_run(
         stale_check_counter += 1;
         if stale_check_counter >= 300 {
             stale_check_counter = 0;
-            meter_manager.borrow_mut().restart_stale_streams(&core, stale_threshold);
+            meter_manager
+                .borrow_mut()
+                .restart_stale_streams(&core, stale_threshold);
         }
     }
 
@@ -435,7 +459,10 @@ fn try_connect_and_run(
 }
 
 /// Handles a global object being added.
-fn handle_global_added(event_tx: &Sender<PwEvent>, global: &pipewire::registry::GlobalObject<&pipewire::spa::utils::dict::DictRef>) {
+fn handle_global_added(
+    event_tx: &Sender<PwEvent>,
+    global: &pipewire::registry::GlobalObject<&pipewire::spa::utils::dict::DictRef>,
+) {
     let props: std::collections::HashMap<String, String> = global
         .props
         .map(|p| {
@@ -567,15 +594,25 @@ fn parse_props_pod(pod: &Pod, node_id: NodeId, event_tx: &Sender<PwEvent>) {
 
     for prop in properties {
         match prop {
-            Property { key, value: Value::Float(v), .. } if key == SPA_PROP_VOLUME => {
+            Property {
+                key,
+                value: Value::Float(v),
+                ..
+            } if key == SPA_PROP_VOLUME => {
                 volume = Some(v);
             }
-            Property { key, value: Value::Bool(m), .. } if key == SPA_PROP_MUTE => {
+            Property {
+                key,
+                value: Value::Bool(m),
+                ..
+            } if key == SPA_PROP_MUTE => {
                 muted = Some(m);
             }
-            Property { key, value: Value::ValueArray(ValueArray::Float(arr)), .. }
-                if key == SPA_PROP_CHANNEL_VOLUMES =>
-            {
+            Property {
+                key,
+                value: Value::ValueArray(ValueArray::Float(arr)),
+                ..
+            } if key == SPA_PROP_CHANNEL_VOLUMES => {
                 channel_volumes = Some(arr);
             }
             _ => {}
@@ -666,7 +703,11 @@ fn try_pactl_volume(id: u32, vol: f32) -> Result<(), String> {
     // Convert linear volume to percentage
     let percent = (vol * 100.0).round() as u32;
     match std::process::Command::new("pactl")
-        .args(["set-sink-input-volume", &id.to_string(), &format!("{}%", percent)])
+        .args([
+            "set-sink-input-volume",
+            &id.to_string(),
+            &format!("{}%", percent),
+        ])
         .output()
     {
         Ok(output) => {
@@ -692,14 +733,13 @@ fn set_node_volume(node_id: &NodeId, volume: &VolumeControl, event_tx: &Sender<P
         volume.channels[0]
     };
 
-    tracing::info!(
-        "set_node_volume for {}: volume={:.3}",
-        node_id.raw(),
-        vol
-    );
+    tracing::info!("set_node_volume for {}: volume={:.3}", node_id.raw(), vol);
 
     VolumeWorker::get_or_init().send(
-        VolumeCommand::SetVolume { node_id: *node_id, volume: vol },
+        VolumeCommand::SetVolume {
+            node_id: *node_id,
+            volume: vol,
+        },
         event_tx.clone(),
     );
 }
@@ -802,7 +842,10 @@ impl VolumeWorker {
     fn send(&self, cmd: VolumeCommand, event_tx: Sender<PwEvent>) {
         // Use try_send to avoid blocking; drop command if queue is full
         if let Err(e) = self.tx.try_send((cmd, event_tx)) {
-            tracing::debug!("Volume command dropped (queue full or disconnected): {:?}", e);
+            tracing::debug!(
+                "Volume command dropped (queue full or disconnected): {:?}",
+                e
+            );
         }
     }
 }
@@ -884,7 +927,10 @@ fn set_node_mute(node_id: &NodeId, muted: bool, event_tx: &Sender<PwEvent>) {
     tracing::info!("set_node_mute for {}: muted={}", node_id.raw(), muted);
 
     VolumeWorker::get_or_init().send(
-        VolumeCommand::SetMute { node_id: *node_id, muted },
+        VolumeCommand::SetMute {
+            node_id: *node_id,
+            muted,
+        },
         event_tx.clone(),
     );
 }
@@ -908,7 +954,10 @@ fn handle_command(
     command: AppCommand,
 ) {
     match command {
-        AppCommand::CreateLink { output_port, input_port } => {
+        AppCommand::CreateLink {
+            output_port,
+            input_port,
+        } => {
             tracing::info!("Creating link: {:?} -> {:?}", output_port, input_port);
 
             // Create the link using the link factory
@@ -983,8 +1032,17 @@ fn handle_command(
             // (PipeWire callback will follow with confirmed value from WirePlumber)
             let _ = event_tx.send(PwEvent::MuteChanged(node_id, muted));
         }
-        AppCommand::SetChannelVolume { node_id, channel, volume } => {
-            tracing::debug!("Setting channel {} volume for {:?}: {:.2}", channel, node_id, volume);
+        AppCommand::SetChannelVolume {
+            node_id,
+            channel,
+            volume,
+        } => {
+            tracing::debug!(
+                "Setting channel {} volume for {:?}: {:.2}",
+                channel,
+                node_id,
+                volume
+            );
 
             // For per-channel volume, we create a VolumeControl with the channel set
             // If we need to set a specific channel, we'd need to get current channels first

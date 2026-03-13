@@ -229,7 +229,11 @@ impl SmartLayout {
     /// Checks if a position is free (no overlapping nodes).
     /// Uses O(n) scan — for batch operations, prefer building a SpatialGrid.
     #[cfg(test)]
-    fn is_position_free(&self, pos: Position, current_positions: &HashMap<NodeId, Position>) -> bool {
+    fn is_position_free(
+        &self,
+        pos: Position,
+        current_positions: &HashMap<NodeId, Position>,
+    ) -> bool {
         let min_distance = self.min_distance();
 
         for existing in current_positions.values() {
@@ -282,7 +286,18 @@ pub fn force_directed_layout(
 
     if sim_nodes.is_empty() {
         // All nodes are satellites with no parents in this set — just return existing
-        return nodes.iter().map(|(id, _, _)| (*id, existing_positions.get(id).copied().unwrap_or(Position::new(0.0, 0.0)))).collect();
+        return nodes
+            .iter()
+            .map(|(id, _, _)| {
+                (
+                    *id,
+                    existing_positions
+                        .get(id)
+                        .copied()
+                        .unwrap_or(Position::new(0.0, 0.0)),
+                )
+            })
+            .collect();
     }
 
     const ITERATIONS: usize = 200;
@@ -396,7 +411,10 @@ pub fn force_directed_layout(
         .iter()
         .enumerate()
         .map(|(i, (id, _, _))| {
-            (*id, Position::new(positions[i][0] - cx, positions[i][1] - cy))
+            (
+                *id,
+                Position::new(positions[i][0] - cx, positions[i][1] - cy),
+            )
         })
         .collect();
 
@@ -490,12 +508,8 @@ mod tests {
         let positions = HashMap::new();
         let viewport_center = Position::new(100.0, 100.0);
 
-        let pos = layout.calculate_new_node_position(
-            NodeId::new(1),
-            &graph,
-            &positions,
-            viewport_center,
-        );
+        let pos =
+            layout.calculate_new_node_position(NodeId::new(1), &graph, &positions, viewport_center);
 
         // Should place near viewport center
         assert!((pos.x - viewport_center.x).abs() < 300.0);

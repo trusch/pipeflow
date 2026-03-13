@@ -139,15 +139,11 @@ pub fn help_button(ui: &mut Ui, category: &str, key: &str) -> Response {
 }
 
 /// Renders a help button with custom styling.
-pub fn help_button_styled(
-    ui: &mut Ui,
-    category: &str,
-    key: &str,
-    style: &HelpStyle,
-) -> Response {
+pub fn help_button_styled(ui: &mut Ui, category: &str, key: &str, style: &HelpStyle) -> Response {
     let button_id = ui.make_persistent_id(format!("help_btn_{}_{}", category, key));
 
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(style.button_size), egui::Sense::click());
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::splat(style.button_size), egui::Sense::click());
 
     if ui.is_rect_visible(rect) {
         let color = if response.hovered() {
@@ -192,34 +188,53 @@ pub fn help_button_styled(
 /// Shows the help popup for an entry.
 #[allow(deprecated)]
 fn show_help_popup(ui: &mut Ui, id: egui::Id, entry: &HelpEntry, style: &HelpStyle) {
-    egui::containers::show_tooltip(ui.ctx(), egui::LayerId::new(egui::Order::Tooltip, id), id, |ui: &mut Ui| {
-        ui.set_max_width(style.popup_width);
+    egui::containers::show_tooltip(
+        ui.ctx(),
+        egui::LayerId::new(egui::Order::Tooltip, id),
+        id,
+        |ui: &mut Ui| {
+            ui.set_max_width(style.popup_width);
 
-        // Title
-        ui.label(RichText::new(&entry.title).strong().size(14.0).color(style.title_color));
-        ui.add_space(6.0);
+            // Title
+            ui.label(
+                RichText::new(&entry.title)
+                    .strong()
+                    .size(14.0)
+                    .color(style.title_color),
+            );
+            ui.add_space(6.0);
 
-        // Content - split by newlines for better rendering
-        for paragraph in entry.content.split("\n\n") {
-            ui.label(RichText::new(paragraph).size(12.0).color(style.content_color));
-            ui.add_space(4.0);
-        }
+            // Content - split by newlines for better rendering
+            for paragraph in entry.content.split("\n\n") {
+                ui.label(
+                    RichText::new(paragraph)
+                        .size(12.0)
+                        .color(style.content_color),
+                );
+                ui.add_space(4.0);
+            }
 
-        // Tip section
-        if let Some(tip) = &entry.tip {
-            ui.add_space(4.0);
-            egui::Frame::NONE
-                .fill(style.tip_bg_color)
-                .corner_radius(4)
-                .inner_margin(8.0)
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Tip:").strong().size(11.0).color(style.tip_color));
-                        ui.label(RichText::new(tip).size(11.0).color(style.tip_color));
+            // Tip section
+            if let Some(tip) = &entry.tip {
+                ui.add_space(4.0);
+                egui::Frame::NONE
+                    .fill(style.tip_bg_color)
+                    .corner_radius(4)
+                    .inner_margin(8.0)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("Tip:")
+                                    .strong()
+                                    .size(11.0)
+                                    .color(style.tip_color),
+                            );
+                            ui.label(RichText::new(tip).size(11.0).color(style.tip_color));
+                        });
                     });
-                });
-        }
-    });
+            }
+        },
+    );
 }
 
 /// Renders a help entry inline (for help panels).
@@ -230,7 +245,12 @@ pub fn show_help_entry(ui: &mut Ui, entry: &HelpEntry) {
 /// Renders a help entry inline with custom styling.
 pub fn show_help_entry_styled(ui: &mut Ui, entry: &HelpEntry, style: &HelpStyle) {
     // Title
-    ui.label(RichText::new(&entry.title).strong().size(14.0).color(style.title_color));
+    ui.label(
+        RichText::new(&entry.title)
+            .strong()
+            .size(14.0)
+            .color(style.title_color),
+    );
     ui.add_space(4.0);
 
     // Content
@@ -251,7 +271,12 @@ pub fn show_help_entry_styled(ui: &mut Ui, entry: &HelpEntry, style: &HelpStyle)
             .inner_margin(8.0)
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new("Tip:").strong().size(11.0).color(style.tip_color));
+                    ui.label(
+                        RichText::new("Tip:")
+                            .strong()
+                            .size(11.0)
+                            .color(style.tip_color),
+                    );
                     ui.label(RichText::new(tip).size(11.0).color(style.tip_color));
                 });
             });

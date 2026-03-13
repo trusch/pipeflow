@@ -263,32 +263,19 @@ impl CommandPalette {
     }
 
     /// Draws a command entry with improved typography.
-    fn draw_command_entry(
-        ui: &mut Ui,
-        rect: egui::Rect,
-        entry: &CommandEntry,
-        is_selected: bool,
-    ) {
+    fn draw_command_entry(ui: &mut Ui, rect: egui::Rect, entry: &CommandEntry, is_selected: bool) {
         let painter = ui.painter();
         let visuals = ui.style().visuals.clone();
 
         // Background for selected item (with rounded corners)
         if is_selected {
-            painter.rect_filled(
-                rect.shrink(2.0),
-                6.0,
-                visuals.selection.bg_fill,
-            );
+            painter.rect_filled(rect.shrink(2.0), 6.0, visuals.selection.bg_fill);
         }
 
         // Hover highlight (subtle)
         let hovered = ui.rect_contains_pointer(rect);
         if hovered && !is_selected {
-            painter.rect_filled(
-                rect.shrink(2.0),
-                6.0,
-                visuals.widgets.hovered.bg_fill,
-            );
+            painter.rect_filled(rect.shrink(2.0), 6.0, visuals.widgets.hovered.bg_fill);
         }
 
         let name_color = if is_selected {
@@ -344,9 +331,7 @@ impl CommandPalette {
 
         ctx.input(|i| {
             // Ctrl+K or Ctrl+P to open
-            if (i.key_pressed(Key::K) || i.key_pressed(Key::P))
-                && i.modifiers.command
-            {
+            if (i.key_pressed(Key::K) || i.key_pressed(Key::P)) && i.modifiers.command {
                 should_open = true;
             }
         });

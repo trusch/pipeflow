@@ -50,7 +50,11 @@ pub fn create_app_icon() -> IconData {
     // Draw three horizontal flow lines with slight curves
     for (i, y_offset) in [-1.0, 0.0, 1.0].iter().enumerate() {
         let base_y = center_y + y_offset * line_spacing;
-        let color = if i == 1 { &accent_color } else { &secondary_color };
+        let color = if i == 1 {
+            &accent_color
+        } else {
+            &secondary_color
+        };
         let thickness = if i == 1 { 12.0 } else { 8.0 };
 
         // Draw a flowing curve
@@ -111,10 +115,10 @@ fn is_in_rounded_rect(x: f32, y: f32, width: f32, height: f32, radius: f32) -> b
 
     // Check corners
     let corners = [
-        (radius, radius),                     // top-left
-        (width - radius, radius),             // top-right
-        (radius, height - radius),            // bottom-left
-        (width - radius, height - radius),    // bottom-right
+        (radius, radius),                  // top-left
+        (width - radius, radius),          // top-right
+        (radius, height - radius),         // bottom-left
+        (width - radius, height - radius), // bottom-right
     ];
 
     for (cx, cy) in corners {
@@ -129,7 +133,14 @@ fn is_in_rounded_rect(x: f32, y: f32, width: f32, height: f32, radius: f32) -> b
 }
 
 /// Draws a filled circle with anti-aliasing.
-fn draw_filled_circle(rgba: &mut [u8], size: usize, cx: f32, cy: f32, radius: f32, color: &[u8; 4]) {
+fn draw_filled_circle(
+    rgba: &mut [u8],
+    size: usize,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    color: &[u8; 4],
+) {
     let min_x = (cx - radius - 1.0).max(0.0) as usize;
     let max_x = (cx + radius + 1.0).min(size as f32 - 1.0) as usize;
     let min_y = (cy - radius - 1.0).max(0.0) as usize;

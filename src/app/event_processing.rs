@@ -9,7 +9,7 @@ use crate::domain::graph::{Link, Node, Port, PortDirection};
 use crate::domain::rules::RuleTrigger;
 use crate::pipewire::events::{MeterUpdate, PwEvent};
 use crate::util::id::NodeId;
-use crate::util::layout::{is_metering_node, get_metering_target_id, SmartLayout};
+use crate::util::layout::{get_metering_target_id, is_metering_node, SmartLayout};
 use crate::util::spatial::Position;
 
 use super::command_handling::create_stable_identifier;
@@ -160,7 +160,10 @@ impl PipeflowApp {
                 PwEvent::Disconnected => {
                     state.connection = ConnectionState::Disconnected;
                     // Persist all current volume states before clearing graph
-                    let volume_snapshot: Vec<_> = state.graph.volumes.iter()
+                    let volume_snapshot: Vec<_> = state
+                        .graph
+                        .volumes
+                        .iter()
                         .filter_map(|(node_id, vol)| {
                             state.graph.get_node(node_id).map(|node| {
                                 let id = create_stable_identifier(node, &state.graph);
@@ -174,7 +177,10 @@ impl PipeflowApp {
                     state.clear_graph();
                     tracing::warn!("Disconnected from PipeWire");
                 }
-                PwEvent::Reconnecting { attempt, max_attempts } => {
+                PwEvent::Reconnecting {
+                    attempt,
+                    max_attempts,
+                } => {
                     state.connection = ConnectionState::Connecting;
                     tracing::info!(
                         "Reconnecting to PipeWire (attempt {}/{})",
@@ -192,7 +198,9 @@ impl PipeflowApp {
                 PwEvent::NodeRemoved(id) => {
                     // Persist volume before removing node
                     let vol_snapshot = state.graph.volumes.get(&id).cloned();
-                    let identifier = state.graph.get_node(&id)
+                    let identifier = state
+                        .graph
+                        .get_node(&id)
                         .map(|node| create_stable_identifier(node, &state.graph));
                     if let (Some(vol), Some(ident)) = (vol_snapshot, identifier) {
                         state.ui.persist_volume(&ident, vol);
@@ -238,7 +246,9 @@ impl PipeflowApp {
                 PwEvent::VolumeChanged(node_id, volume) => {
                     state.graph.volumes.insert(node_id, volume.clone());
                     // Persist volume for restoration after node restart
-                    let identifier = state.graph.get_node(&node_id)
+                    let identifier = state
+                        .graph
+                        .get_node(&node_id)
                         .map(|node| create_stable_identifier(node, &state.graph));
                     if let Some(ident) = identifier {
                         state.ui.persist_volume(&ident, volume);
@@ -255,7 +265,9 @@ impl PipeflowApp {
                     };
                     // Persist updated mute state
                     if let Some(vol) = updated {
-                        let identifier = state.graph.get_node(&node_id)
+                        let identifier = state
+                            .graph
+                            .get_node(&node_id)
                             .map(|node| create_stable_identifier(node, &state.graph));
                         if let Some(ident) = identifier {
                             state.ui.persist_volume(&ident, vol);
@@ -385,18 +397,28 @@ impl PipeflowApp {
             };
 
             state.ui.animate_to_position(info.id, position, true);
-            state.ui.persistent_positions.insert(identifier.clone(), position);
+            state
+                .ui
+                .persistent_positions
+                .insert(identifier.clone(), position);
         }
 
         // Restore uninteresting status from persistent storage
-        state.ui.restore_uninteresting_for_node(info.id, &identifier);
+        state
+            .ui
+            .restore_uninteresting_for_node(info.id, &identifier);
 
         // Restore custom display name from persistent storage
         state.ui.restore_custom_name_for_node(info.id, &identifier);
 
         // Restore volume/mute state from persistent storage (e.g., after app restart)
         if let Some(volume) = state.ui.restore_volume_for_node(&identifier).cloned() {
-            tracing::debug!("Restoring volume for node {:?}: master={:.3}, muted={}", info.id, volume.master, volume.muted);
+            tracing::debug!(
+                "Restoring volume for node {:?}: master={:.3}, muted={}",
+                info.id,
+                volume.master,
+                volume.muted
+            );
             state.graph.volumes.insert(info.id, volume);
         }
 
@@ -409,10 +431,7 @@ impl PipeflowApp {
 
     /// Evaluates connection rules when a node appears.
     /// Queues pending connections to be created by the main loop.
-    fn reconcile_rules_for_node(
-        state: &mut crate::core::state::AppState,
-        trigger_node_id: NodeId,
-    ) {
+    fn reconcile_rules_for_node(state: &mut crate::core::state::AppState, trigger_node_id: NodeId) {
         let trigger_node = match state.graph.get_node(&trigger_node_id) {
             Some(n) => n,
             None => return,
@@ -421,7 +440,10 @@ impl PipeflowApp {
         let trigger_node_name = trigger_node.name.clone();
 
         // Collect all port IDs for the trigger node
-        let trigger_port_ids: Vec<_> = state.graph.ports.values()
+        let trigger_port_ids: Vec<_> = state
+            .graph
+            .ports
+            .values()
             .filter(|p| p.node_id == trigger_node_id)
             .map(|p| p.id)
             .collect();
@@ -432,14 +454,20 @@ impl PipeflowApp {
         }
 
         // Evaluate each enabled rule
-        let rules: Vec<_> = state.ui.rules.enabled_rules()
+        let rules: Vec<_> = state
+            .ui
+            .rules
+            .enabled_rules()
             .map(|r| (r.id, r.trigger, r.exclusive, r.connections.clone()))
             .collect();
 
         for (rule_id, trigger, exclusive, connections) in rules {
             for spec in &connections {
                 // Find all output ports matching the output pattern
-                let output_ports: Vec<_> = state.graph.ports.values()
+                let output_ports: Vec<_> = state
+                    .graph
+                    .ports
+                    .values()
                     .filter(|p| p.direction == PortDirection::Output)
                     .filter(|p| {
                         let node = state.graph.get_node(&p.node_id);
@@ -449,13 +477,17 @@ impl PipeflowApp {
                                 &n.name,
                                 &p.name,
                             )
-                        }).unwrap_or(false)
+                        })
+                        .unwrap_or(false)
                     })
                     .map(|p| (p.id, p.node_id))
                     .collect();
 
                 // Find all input ports matching the input pattern
-                let input_ports: Vec<_> = state.graph.ports.values()
+                let input_ports: Vec<_> = state
+                    .graph
+                    .ports
+                    .values()
                     .filter(|p| p.direction == PortDirection::Input)
                     .filter(|p| {
                         let node = state.graph.get_node(&p.node_id);
@@ -465,7 +497,8 @@ impl PipeflowApp {
                                 &n.name,
                                 &p.name,
                             )
-                        }).unwrap_or(false)
+                        })
+                        .unwrap_or(false)
                     })
                     .map(|p| (p.id, p.node_id))
                     .collect();
@@ -477,7 +510,8 @@ impl PipeflowApp {
                             RuleTrigger::OnSourceAppear => *output_node_id == trigger_node_id,
                             RuleTrigger::OnTargetAppear => *input_node_id == trigger_node_id,
                             RuleTrigger::OnBothPresent => {
-                                *output_node_id == trigger_node_id || *input_node_id == trigger_node_id
+                                *output_node_id == trigger_node_id
+                                    || *input_node_id == trigger_node_id
                             }
                             RuleTrigger::ManualOnly => false,
                         };
@@ -492,7 +526,11 @@ impl PipeflowApp {
                         });
 
                         if !link_exists {
-                            state.ui.rules.queue_connection(*output_port_id, *input_port_id, rule_id);
+                            state.ui.rules.queue_connection(
+                                *output_port_id,
+                                *input_port_id,
+                                rule_id,
+                            );
                         }
                     }
                 }
@@ -504,8 +542,8 @@ impl PipeflowApp {
                         for link in state.graph.links.values() {
                             if link.output_port == *output_port_id {
                                 // Check if this link's input is NOT one of our matched inputs
-                                let is_rule_link = input_ports.iter()
-                                    .any(|(ip, _)| link.input_port == *ip);
+                                let is_rule_link =
+                                    input_ports.iter().any(|(ip, _)| link.input_port == *ip);
                                 if !is_rule_link {
                                     state.ui.rules.queue_disconnection(link.id);
                                 }
@@ -516,8 +554,8 @@ impl PipeflowApp {
                         for link in state.graph.links.values() {
                             if link.input_port == *input_port_id {
                                 // Check if this link's output is NOT one of our matched outputs
-                                let is_rule_link = output_ports.iter()
-                                    .any(|(op, _)| link.output_port == *op);
+                                let is_rule_link =
+                                    output_ports.iter().any(|(op, _)| link.output_port == *op);
                                 if !is_rule_link {
                                     state.ui.rules.queue_disconnection(link.id);
                                 }

@@ -451,8 +451,14 @@ mod tests {
     #[test]
     fn test_media_class_parsing() {
         // Test using the FromStr trait via .parse()
-        assert_eq!("Audio/Source".parse::<MediaClass>().unwrap(), MediaClass::AudioSource);
-        assert_eq!("Audio/Sink".parse::<MediaClass>().unwrap(), MediaClass::AudioSink);
+        assert_eq!(
+            "Audio/Source".parse::<MediaClass>().unwrap(),
+            MediaClass::AudioSource
+        );
+        assert_eq!(
+            "Audio/Sink".parse::<MediaClass>().unwrap(),
+            MediaClass::AudioSink
+        );
         assert_eq!(
             "Stream/Output/Audio".parse::<MediaClass>().unwrap(),
             MediaClass::StreamOutputAudio
@@ -463,7 +469,10 @@ mod tests {
         ));
 
         // Test using from_pipewire_str directly
-        assert_eq!(MediaClass::from_pipewire_str("Audio/Source"), MediaClass::AudioSource);
+        assert_eq!(
+            MediaClass::from_pipewire_str("Audio/Source"),
+            MediaClass::AudioSource
+        );
     }
 
     #[test]
@@ -552,12 +561,18 @@ mod tests {
     #[test]
     fn test_media_class_all_variants_have_display_name() {
         let classes = vec![
-            MediaClass::AudioSource, MediaClass::AudioSink,
-            MediaClass::StreamOutputAudio, MediaClass::StreamInputAudio,
-            MediaClass::VideoSource, MediaClass::VideoSink,
-            MediaClass::MidiSource, MediaClass::MidiSink,
-            MediaClass::AudioVideoSource, MediaClass::AudioDevice,
-            MediaClass::VideoDevice, MediaClass::Other("Custom".into()),
+            MediaClass::AudioSource,
+            MediaClass::AudioSink,
+            MediaClass::StreamOutputAudio,
+            MediaClass::StreamInputAudio,
+            MediaClass::VideoSource,
+            MediaClass::VideoSink,
+            MediaClass::MidiSource,
+            MediaClass::MidiSink,
+            MediaClass::AudioVideoSource,
+            MediaClass::AudioDevice,
+            MediaClass::VideoDevice,
+            MediaClass::Other("Custom".into()),
         ];
         for mc in &classes {
             assert!(!mc.display_name().is_empty());
@@ -586,7 +601,12 @@ mod tests {
 
     #[test]
     fn test_port_display_name_with_alias() {
-        let mut port = Port::new(PortId::new(1), NodeId::new(1), "raw".to_string(), PortDirection::Input);
+        let mut port = Port::new(
+            PortId::new(1),
+            NodeId::new(1),
+            "raw".to_string(),
+            PortDirection::Input,
+        );
         assert_eq!(port.display_name(), "raw");
         port.alias = Some("Friendly Name".to_string());
         assert_eq!(port.display_name(), "Friendly Name");
@@ -596,8 +616,10 @@ mod tests {
     fn test_link_creation_and_state() {
         let link = Link::new(
             crate::util::id::LinkId::new(1),
-            PortId::new(1), PortId::new(2),
-            NodeId::new(10), NodeId::new(20),
+            PortId::new(1),
+            PortId::new(2),
+            NodeId::new(10),
+            NodeId::new(20),
         );
         assert!(link.is_active);
         assert_eq!(link.state, LinkState::Init);
@@ -607,11 +629,20 @@ mod tests {
     #[test]
     fn test_link_state_display_names_unique() {
         let states = [
-            LinkState::Init, LinkState::Negotiating, LinkState::Allocating,
-            LinkState::Paused, LinkState::Active, LinkState::Error, LinkState::Unlinked,
+            LinkState::Init,
+            LinkState::Negotiating,
+            LinkState::Allocating,
+            LinkState::Paused,
+            LinkState::Active,
+            LinkState::Error,
+            LinkState::Unlinked,
         ];
         let names: std::collections::HashSet<_> = states.iter().map(|s| s.display_name()).collect();
-        assert_eq!(names.len(), states.len(), "All link state display names should be unique");
+        assert_eq!(
+            names.len(),
+            states.len(),
+            "All link state display names should be unique"
+        );
     }
 
     #[test]
@@ -632,9 +663,24 @@ mod tests {
     #[test]
     fn test_node_input_output_ports() {
         let mut ports_map = HashMap::new();
-        let p1 = Port::new(PortId::new(1), NodeId::new(10), "in_L".into(), PortDirection::Input);
-        let p2 = Port::new(PortId::new(2), NodeId::new(10), "in_R".into(), PortDirection::Input);
-        let p3 = Port::new(PortId::new(3), NodeId::new(10), "out_L".into(), PortDirection::Output);
+        let p1 = Port::new(
+            PortId::new(1),
+            NodeId::new(10),
+            "in_L".into(),
+            PortDirection::Input,
+        );
+        let p2 = Port::new(
+            PortId::new(2),
+            NodeId::new(10),
+            "in_R".into(),
+            PortDirection::Input,
+        );
+        let p3 = Port::new(
+            PortId::new(3),
+            NodeId::new(10),
+            "out_L".into(),
+            PortDirection::Output,
+        );
         ports_map.insert(p1.id, p1);
         ports_map.insert(p2.id, p2);
         ports_map.insert(p3.id, p3);

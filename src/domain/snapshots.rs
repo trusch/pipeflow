@@ -204,8 +204,8 @@ impl SnapshotManager {
         std::fs::create_dir_all(&dir)
             .with_context(|| format!("Failed to create snapshots dir {:?}", dir))?;
         let path = self.snapshot_path(snapshot.id);
-        let json = serde_json::to_string_pretty(snapshot)
-            .context("Failed to serialize snapshot")?;
+        let json =
+            serde_json::to_string_pretty(snapshot).context("Failed to serialize snapshot")?;
         std::fs::write(&path, json)
             .with_context(|| format!("Failed to write snapshot {:?}", path))?;
         Ok(())

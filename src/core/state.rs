@@ -244,7 +244,6 @@ impl GraphState {
             .filter(|l| l.output_node == *node_id || l.input_node == *node_id)
             .collect()
     }
-
 }
 
 /// Serialization helper for HashMap<NodeIdentifier, Position>.
@@ -296,10 +295,7 @@ mod persistent_identifiers_serde {
     use super::*;
     use serde::{Deserializer, Serializer};
 
-    pub fn serialize<S>(
-        set: &HashSet<NodeIdentifier>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(set: &HashSet<NodeIdentifier>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -307,9 +303,7 @@ mod persistent_identifiers_serde {
         entries.serialize(serializer)
     }
 
-    pub fn deserialize<'de, D>(
-        deserializer: D,
-    ) -> Result<HashSet<NodeIdentifier>, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<HashSet<NodeIdentifier>, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -347,9 +341,7 @@ mod persistent_names_serde {
         entries.serialize(serializer)
     }
 
-    pub fn deserialize<'de, D>(
-        deserializer: D,
-    ) -> Result<HashMap<NodeIdentifier, String>, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<NodeIdentifier, String>, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -600,7 +592,11 @@ impl UiState {
 
     /// Restores a node's uninteresting status from persistent storage if available.
     /// Returns true if the node was marked as uninteresting.
-    pub fn restore_uninteresting_for_node(&mut self, node_id: NodeId, identifier: &NodeIdentifier) -> bool {
+    pub fn restore_uninteresting_for_node(
+        &mut self,
+        node_id: NodeId,
+        identifier: &NodeIdentifier,
+    ) -> bool {
         if self.persistent_uninteresting.contains(identifier) {
             self.uninteresting_nodes.insert(node_id);
             true
@@ -610,7 +606,12 @@ impl UiState {
     }
 
     /// Updates both runtime and persistent uninteresting status for a node.
-    pub fn update_uninteresting(&mut self, node_id: NodeId, identifier: &NodeIdentifier, uninteresting: bool) {
+    pub fn update_uninteresting(
+        &mut self,
+        node_id: NodeId,
+        identifier: &NodeIdentifier,
+        uninteresting: bool,
+    ) {
         if uninteresting {
             self.uninteresting_nodes.insert(node_id);
             self.persistent_uninteresting.insert(identifier.clone());
@@ -629,7 +630,8 @@ impl UiState {
     /// Sets a custom display name for a node.
     pub fn set_custom_name(&mut self, node_id: NodeId, identifier: &NodeIdentifier, name: String) {
         self.custom_names.insert(node_id, name.clone());
-        self.persistent_custom_names.insert(identifier.clone(), name);
+        self.persistent_custom_names
+            .insert(identifier.clone(), name);
     }
 
     /// Clears the custom display name for a node.
@@ -640,7 +642,11 @@ impl UiState {
 
     /// Restores a node's custom display name from persistent storage if available.
     /// Returns true if a custom name was restored.
-    pub fn restore_custom_name_for_node(&mut self, node_id: NodeId, identifier: &NodeIdentifier) -> bool {
+    pub fn restore_custom_name_for_node(
+        &mut self,
+        node_id: NodeId,
+        identifier: &NodeIdentifier,
+    ) -> bool {
         if let Some(name) = self.persistent_custom_names.get(identifier).cloned() {
             self.custom_names.insert(node_id, name);
             true
@@ -660,7 +666,11 @@ impl UiState {
 
     /// Restores a node's position from persistent storage if available.
     /// Returns true if a position was restored.
-    pub fn restore_position_for_node(&mut self, node_id: NodeId, identifier: &NodeIdentifier) -> bool {
+    pub fn restore_position_for_node(
+        &mut self,
+        node_id: NodeId,
+        identifier: &NodeIdentifier,
+    ) -> bool {
         if let Some(&pos) = self.persistent_positions.get(identifier) {
             self.node_positions.insert(node_id, pos);
             true
@@ -905,10 +915,10 @@ mod tests {
             Position::new(100.0, 200.0),
         );
 
-        let json = serde_json::to_string_pretty(&ui_state)
-            .expect("UiState serialization should not fail");
-        let deserialized: UiState = serde_json::from_str(&json)
-            .expect("UiState deserialization should not fail");
+        let json =
+            serde_json::to_string_pretty(&ui_state).expect("UiState serialization should not fail");
+        let deserialized: UiState =
+            serde_json::from_str(&json).expect("UiState deserialization should not fail");
         assert_eq!(deserialized.persistent_positions.len(), 1);
     }
 
@@ -929,26 +939,65 @@ mod tests {
         graph.add_node(sink);
 
         // Add ports
-        graph.add_port(Port::new(PortId::new(10), NodeId::new(1), "output_FL".to_string(), PortDirection::Output));
-        graph.add_port(Port::new(PortId::new(11), NodeId::new(1), "output_FR".to_string(), PortDirection::Output));
-        graph.add_port(Port::new(PortId::new(20), NodeId::new(2), "input_FL".to_string(), PortDirection::Input));
-        graph.add_port(Port::new(PortId::new(21), NodeId::new(2), "input_FR".to_string(), PortDirection::Input));
+        graph.add_port(Port::new(
+            PortId::new(10),
+            NodeId::new(1),
+            "output_FL".to_string(),
+            PortDirection::Output,
+        ));
+        graph.add_port(Port::new(
+            PortId::new(11),
+            NodeId::new(1),
+            "output_FR".to_string(),
+            PortDirection::Output,
+        ));
+        graph.add_port(Port::new(
+            PortId::new(20),
+            NodeId::new(2),
+            "input_FL".to_string(),
+            PortDirection::Input,
+        ));
+        graph.add_port(Port::new(
+            PortId::new(21),
+            NodeId::new(2),
+            "input_FR".to_string(),
+            PortDirection::Input,
+        ));
 
         // Verify port assignment to nodes
         assert_eq!(graph.get_node(&NodeId::new(1)).unwrap().port_ids.len(), 2);
         assert_eq!(graph.get_node(&NodeId::new(2)).unwrap().port_ids.len(), 2);
 
         // Create links
-        graph.add_link(Link::new(LinkId::new(100), PortId::new(10), PortId::new(20), NodeId::new(1), NodeId::new(2)));
-        graph.add_link(Link::new(LinkId::new(101), PortId::new(11), PortId::new(21), NodeId::new(1), NodeId::new(2)));
+        graph.add_link(Link::new(
+            LinkId::new(100),
+            PortId::new(10),
+            PortId::new(20),
+            NodeId::new(1),
+            NodeId::new(2),
+        ));
+        graph.add_link(Link::new(
+            LinkId::new(101),
+            PortId::new(11),
+            PortId::new(21),
+            NodeId::new(1),
+            NodeId::new(2),
+        ));
         assert_eq!(graph.links.len(), 2);
         assert_eq!(graph.links_for_node(&NodeId::new(1)).len(), 2);
 
         // Remove source node - should cascade delete ports and links
         graph.remove_node(&NodeId::new(1));
         assert!(graph.get_node(&NodeId::new(1)).is_none());
-        assert_eq!(graph.links.len(), 0, "Links should be removed when node is removed");
-        assert!(graph.get_port(&PortId::new(10)).is_none(), "Ports should be removed when node is removed");
+        assert_eq!(
+            graph.links.len(),
+            0,
+            "Links should be removed when node is removed"
+        );
+        assert!(
+            graph.get_port(&PortId::new(10)).is_none(),
+            "Ports should be removed when node is removed"
+        );
 
         // Sink node should still exist with its ports
         assert!(graph.get_node(&NodeId::new(2)).is_some());
@@ -984,11 +1033,20 @@ mod tests {
         let restored_uninteresting = ui.restore_uninteresting_for_node(new_node_id, &identifier);
         let restored_name = ui.restore_custom_name_for_node(new_node_id, &identifier);
 
-        assert!(restored_pos, "Position should be restored from persistent state");
-        assert!(restored_uninteresting, "Uninteresting status should be restored");
+        assert!(
+            restored_pos,
+            "Position should be restored from persistent state"
+        );
+        assert!(
+            restored_uninteresting,
+            "Uninteresting status should be restored"
+        );
         assert!(restored_name, "Custom name should be restored");
 
-        assert_eq!(ui.get_node_position(&new_node_id), Position::new(300.0, 400.0));
+        assert_eq!(
+            ui.get_node_position(&new_node_id),
+            Position::new(300.0, 400.0)
+        );
         assert!(ui.is_uninteresting(&new_node_id));
         assert_eq!(ui.get_custom_name(&new_node_id), Some("My SuperCollider"));
     }
@@ -1030,11 +1088,7 @@ mod tests {
 
         let mut ui = UiState::default();
         let node_id = NodeId::new(1);
-        let identifier = NodeIdentifier::new(
-            "node".to_string(),
-            None,
-            None,
-        );
+        let identifier = NodeIdentifier::new("node".to_string(), None, None);
 
         // Set up both runtime and persistent state
         ui.update_position(node_id, &identifier, Position::new(100.0, 200.0));
@@ -1107,13 +1161,33 @@ mod tests {
 
         graph.add_node(Node::new(NodeId::new(1), "Node1".to_string()));
         graph.add_node(Node::new(NodeId::new(2), "Node2".to_string()));
-        graph.add_port(Port::new(PortId::new(10), NodeId::new(1), "out".to_string(), PortDirection::Output));
-        graph.add_port(Port::new(PortId::new(20), NodeId::new(2), "in".to_string(), PortDirection::Input));
-        graph.add_link(Link::new(LinkId::new(100), PortId::new(10), PortId::new(20), NodeId::new(1), NodeId::new(2)));
+        graph.add_port(Port::new(
+            PortId::new(10),
+            NodeId::new(1),
+            "out".to_string(),
+            PortDirection::Output,
+        ));
+        graph.add_port(Port::new(
+            PortId::new(20),
+            NodeId::new(2),
+            "in".to_string(),
+            PortDirection::Input,
+        ));
+        graph.add_link(Link::new(
+            LinkId::new(100),
+            PortId::new(10),
+            PortId::new(20),
+            NodeId::new(1),
+            NodeId::new(2),
+        ));
 
         assert_eq!(graph.links.len(), 1);
         graph.remove_port(&PortId::new(10));
-        assert_eq!(graph.links.len(), 0, "Link should be removed when port is removed");
+        assert_eq!(
+            graph.links.len(),
+            0,
+            "Link should be removed when port is removed"
+        );
         // Link meters should also be cleaned up
         assert!(!graph.link_meters.contains_key(&LinkId::new(100)));
     }
@@ -1123,7 +1197,12 @@ mod tests {
     fn test_graph_clear() {
         let mut graph = GraphState::default();
         graph.add_node(Node::new(NodeId::new(1), "N".to_string()));
-        graph.add_port(Port::new(PortId::new(10), NodeId::new(1), "p".to_string(), PortDirection::Output));
+        graph.add_port(Port::new(
+            PortId::new(10),
+            NodeId::new(1),
+            "p".to_string(),
+            PortDirection::Output,
+        ));
 
         assert!(!graph.nodes.is_empty());
         graph.clear();
@@ -1190,7 +1269,11 @@ mod tests {
         assert_eq!(graph.links.len(), 497); // 2 links removed
 
         let elapsed = start.elapsed();
-        assert!(elapsed.as_secs() < 2, "500-node operations should complete in <2s, took {:?}", elapsed);
+        assert!(
+            elapsed.as_secs() < 2,
+            "500-node operations should complete in <2s, took {:?}",
+            elapsed
+        );
     }
 
     /// Test: concurrent SharedState access (basic soundness).
@@ -1204,10 +1287,9 @@ mod tests {
                     // Writer: add a node
                     {
                         let mut write = s.write();
-                        write.graph.add_node(Node::new(
-                            NodeId::new(i),
-                            format!("thread_{}", i),
-                        ));
+                        write
+                            .graph
+                            .add_node(Node::new(NodeId::new(i), format!("thread_{}", i)));
                     }
                     // Reader: count nodes
                     {
@@ -1233,15 +1315,20 @@ mod tests {
 
         let mut ui = UiState::default();
         let id = NodeIdentifier::new("node".into(), Some("app".into()), None);
-        ui.persistent_positions.insert(id.clone(), Position::new(42.0, 99.0));
+        ui.persistent_positions
+            .insert(id.clone(), Position::new(42.0, 99.0));
         ui.persistent_uninteresting.insert(id.clone());
         ui.persistent_custom_names.insert(id, "My Name".to_string());
 
         let json = serde_json::to_string(&ui).expect("Serialization should not fail");
-        let restored: UiState = serde_json::from_str(&json).expect("Deserialization should not fail");
+        let restored: UiState =
+            serde_json::from_str(&json).expect("Deserialization should not fail");
 
         assert_eq!(ui.persistent_positions, restored.persistent_positions);
-        assert_eq!(ui.persistent_uninteresting, restored.persistent_uninteresting);
+        assert_eq!(
+            ui.persistent_uninteresting,
+            restored.persistent_uninteresting
+        );
         assert_eq!(ui.persistent_custom_names, restored.persistent_custom_names);
     }
 
@@ -1249,7 +1336,12 @@ mod tests {
     #[test]
     fn test_add_port_to_missing_node() {
         let mut graph = GraphState::default();
-        let port = Port::new(PortId::new(10), NodeId::new(999), "orphan".into(), PortDirection::Input);
+        let port = Port::new(
+            PortId::new(10),
+            NodeId::new(999),
+            "orphan".into(),
+            PortDirection::Input,
+        );
         graph.add_port(port);
         // Port is still stored, just not linked to any node
         assert!(graph.get_port(&PortId::new(10)).is_some());
@@ -1270,7 +1362,13 @@ mod tests {
         let mut graph = GraphState::default();
         graph.add_node(Node::new(NodeId::new(1), "A".into()));
         graph.add_node(Node::new(NodeId::new(2), "B".into()));
-        graph.add_link(Link::new(LinkId::new(1), PortId::new(1), PortId::new(2), NodeId::new(1), NodeId::new(2)));
+        graph.add_link(Link::new(
+            LinkId::new(1),
+            PortId::new(1),
+            PortId::new(2),
+            NodeId::new(1),
+            NodeId::new(2),
+        ));
         assert!(graph.link_meters.contains_key(&LinkId::new(1)));
         graph.remove_link(&LinkId::new(1));
         assert!(!graph.link_meters.contains_key(&LinkId::new(1)));

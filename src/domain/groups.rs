@@ -152,16 +152,16 @@ impl GroupColor {
     /// Predefined colors for groups.
     pub fn palette() -> Vec<Self> {
         vec![
-            Self::new(99, 155, 255),   // Blue
-            Self::new(255, 99, 132),   // Red
-            Self::new(75, 192, 192),   // Teal
-            Self::new(255, 206, 86),   // Yellow
-            Self::new(153, 102, 255),  // Purple
-            Self::new(255, 159, 64),   // Orange
-            Self::new(46, 204, 113),   // Green
-            Self::new(231, 76, 60),    // Crimson
-            Self::new(52, 152, 219),   // Light Blue
-            Self::new(155, 89, 182),   // Violet
+            Self::new(99, 155, 255),  // Blue
+            Self::new(255, 99, 132),  // Red
+            Self::new(75, 192, 192),  // Teal
+            Self::new(255, 206, 86),  // Yellow
+            Self::new(153, 102, 255), // Purple
+            Self::new(255, 159, 64),  // Orange
+            Self::new(46, 204, 113),  // Green
+            Self::new(231, 76, 60),   // Crimson
+            Self::new(52, 152, 219),  // Light Blue
+            Self::new(155, 89, 182),  // Violet
         ]
     }
 
@@ -243,7 +243,6 @@ impl GroupManager {
             group.reconcile_node(node_id, identifier);
         }
     }
-
 }
 
 #[cfg(test)]

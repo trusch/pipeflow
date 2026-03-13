@@ -26,11 +26,19 @@ impl PipeflowApp {
             Ok(conn) => conn,
             Err(e) => {
                 tracing::error!("Failed to create PipeWire connection: {}", e);
-                return Self::new_disconnected(cc, config, state, needs_initial_layout, saved_zoom, saved_pan);
+                return Self::new_disconnected(
+                    cc,
+                    config,
+                    state,
+                    needs_initial_layout,
+                    saved_zoom,
+                    saved_pan,
+                );
             }
         };
 
-        let command_handler = crate::core::commands::CommandHandler::new(pw_connection.command_tx.clone());
+        let command_handler =
+            crate::core::commands::CommandHandler::new(pw_connection.command_tx.clone());
 
         // Set initial safety mode from config
         {
@@ -110,11 +118,7 @@ impl PipeflowApp {
     ///
     /// Connects to a remote Pipeflow server via gRPC.
     #[cfg(feature = "network")]
-    pub fn new_remote(
-        cc: &eframe::CreationContext<'_>,
-        addr: &str,
-        token: Option<String>,
-    ) -> Self {
+    pub fn new_remote(cc: &eframe::CreationContext<'_>, addr: &str, token: Option<String>) -> Self {
         use crate::network::RemoteConnection;
 
         let config = load_config();
@@ -137,7 +141,14 @@ impl PipeflowApp {
             Ok(rt) => rt,
             Err(e) => {
                 tracing::error!("Failed to create tokio runtime: {}", e);
-                return Self::new_disconnected(cc, config, state, needs_initial_layout, saved_zoom, saved_pan);
+                return Self::new_disconnected(
+                    cc,
+                    config,
+                    state,
+                    needs_initial_layout,
+                    saved_zoom,
+                    saved_pan,
+                );
             }
         };
 

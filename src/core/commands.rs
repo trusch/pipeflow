@@ -201,8 +201,8 @@ impl CommandRegistry {
     fn register_defaults(&mut self) {
         // Safety commands
         self.register(CommandEntry {
-            name: "Toggle Read-Only Mode".to_string(),
-            description: "Toggle read-only mode".to_string(),
+            name: "Switch to Read-Only".to_string(),
+            description: "Lock editing until you switch back to Normal".to_string(),
             shortcut: None,
             action: CommandAction::Ui(UiCommand::SetSafetyMode(
                 crate::domain::safety::SafetyMode::ReadOnly,
@@ -210,8 +210,8 @@ impl CommandRegistry {
         });
 
         self.register(CommandEntry {
-            name: "Set Normal Mode".to_string(),
-            description: "Switch to normal mode (all actions allowed)".to_string(),
+            name: "Switch to Normal".to_string(),
+            description: "Unlock routing and volume changes".to_string(),
             shortcut: None,
             action: CommandAction::Ui(UiCommand::SetSafetyMode(
                 crate::domain::safety::SafetyMode::Normal,
@@ -219,8 +219,8 @@ impl CommandRegistry {
         });
 
         self.register(CommandEntry {
-            name: "Set Stage Mode".to_string(),
-            description: "Switch to stage mode (safe for live use)".to_string(),
+            name: "Switch to Stage".to_string(),
+            description: "Lock the patch for live use while keeping emergency mute".to_string(),
             shortcut: None,
             action: CommandAction::Ui(UiCommand::SetSafetyMode(
                 crate::domain::safety::SafetyMode::Stage,
@@ -251,8 +251,8 @@ impl CommandRegistry {
         });
 
         self.register(CommandEntry {
-            name: "Reset View".to_string(),
-            description: "Reset zoom and pan".to_string(),
+            name: "Fit All".to_string(),
+            description: "Fit the full patch in view (formerly Reset View)".to_string(),
             shortcut: Some("Ctrl+0".to_string()),
             action: CommandAction::Custom("reset_view".to_string()),
         });
@@ -273,37 +273,39 @@ impl CommandRegistry {
 
         // UI panel toggles
         self.register(CommandEntry {
-            name: "Toggle Help Panel".to_string(),
-            description: "Show or hide the help panel".to_string(),
+            name: "Toggle Help".to_string(),
+            description: "Show or hide help".to_string(),
             shortcut: Some("H".to_string()),
             action: CommandAction::Custom("toggle_help".to_string()),
         });
 
         self.register(CommandEntry {
-            name: "Toggle Inspector Panel".to_string(),
-            description: "Show or hide the inspector panel".to_string(),
+            name: "Toggle Details".to_string(),
+            description: "Show or hide the details panel (Inspector)".to_string(),
             shortcut: Some("I".to_string()),
             action: CommandAction::Custom("toggle_inspector".to_string()),
         });
 
         self.register(CommandEntry {
             name: "Toggle Settings".to_string(),
-            description: "Show or hide the settings panel".to_string(),
+            description: "Show or hide settings".to_string(),
             shortcut: Some(",".to_string()),
             action: CommandAction::Custom("toggle_settings".to_string()),
         });
 
         // Sidebar commands
         self.register(CommandEntry {
-            name: "Toggle Left Sidebar".to_string(),
-            description: "Show or hide the left sidebar (filters, groups, help)".to_string(),
+            name: "Toggle Navigation".to_string(),
+            description:
+                "Show or hide the left navigation rail (Patch, Auto Connect, Saved Setups)"
+                    .to_string(),
             shortcut: Some("[".to_string()),
             action: CommandAction::Custom("toggle_left_sidebar".to_string()),
         });
 
         self.register(CommandEntry {
-            name: "Toggle Right Sidebar".to_string(),
-            description: "Show or hide the right sidebar (inspector)".to_string(),
+            name: "Toggle Details Sidebar".to_string(),
+            description: "Show or hide the details sidebar".to_string(),
             shortcut: Some("]".to_string()),
             action: CommandAction::Custom("toggle_right_sidebar".to_string()),
         });
@@ -325,8 +327,8 @@ impl CommandRegistry {
 
         // Snapshot commands
         self.register(CommandEntry {
-            name: "Save Snapshot".to_string(),
-            description: "Save current routing as a snapshot".to_string(),
+            name: "Save Setup".to_string(),
+            description: "Save the current routing as a setup (snapshot)".to_string(),
             shortcut: None,
             action: CommandAction::Custom("save_snapshot".to_string()),
         });
@@ -334,22 +336,22 @@ impl CommandRegistry {
         // Group commands
         self.register(CommandEntry {
             name: "Create Group".to_string(),
-            description: "Create a group from selected nodes".to_string(),
+            description: "Collect the selected nodes into a named group".to_string(),
             shortcut: Some("Ctrl+G".to_string()),
             action: CommandAction::Ui(UiCommand::CreateGroupFromSelection(None)),
         });
 
         // Layout commands
         self.register(CommandEntry {
-            name: "Auto-Layout".to_string(),
-            description: "Automatically arrange nodes for clarity".to_string(),
+            name: "Organize Patch".to_string(),
+            description: "Rearrange the full patch for clarity (auto-layout)".to_string(),
             shortcut: Some("Ctrl+L".to_string()),
             action: CommandAction::Custom("auto_layout".to_string()),
         });
 
         self.register(CommandEntry {
-            name: "Auto-Layout Selected".to_string(),
-            description: "Arrange only selected nodes".to_string(),
+            name: "Organize Selection".to_string(),
+            description: "Rearrange only the selected nodes".to_string(),
             shortcut: None,
             action: CommandAction::Custom("auto_layout_selected".to_string()),
         });

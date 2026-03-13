@@ -6,7 +6,9 @@
 use crate::core::commands::AppCommand;
 use crate::core::state::AppState;
 use crate::domain::audio::VolumeControl;
-use crate::domain::graph::{AudioFormat, Link, LinkState, MediaClass, Node, NodeLayer, Port, PortDirection};
+use crate::domain::graph::{
+    AudioFormat, Link, LinkState, MediaClass, Node, NodeLayer, Port, PortDirection,
+};
 use crate::domain::safety::{SafetyController, SafetyMode};
 use crate::pipewire::events::{LinkInfo, MeterUpdate, NodeInfo, PortInfo, PwEvent};
 use crate::util::id::{LinkId, NodeId, PortId};
@@ -164,7 +166,8 @@ pub fn command_from_proto(cmd: &proto::Command) -> Option<AppCommand> {
         // Panic commands are no longer supported
         proto::command::Command::PanicMute(_) | proto::command::Command::PanicRestore(_) => None,
         // These are UI-only commands handled directly by the gRPC server
-        proto::command::Command::SetSafetyMode(_) | proto::command::Command::ToggleRoutingLock(_) => None,
+        proto::command::Command::SetSafetyMode(_)
+        | proto::command::Command::ToggleRoutingLock(_) => None,
     })
 }
 
@@ -398,7 +401,9 @@ fn link_info_to_proto(info: &LinkInfo) -> proto::Link {
     }
 }
 
-fn connection_state_to_proto(state: &crate::core::state::ConnectionState) -> proto::ConnectionStatus {
+fn connection_state_to_proto(
+    state: &crate::core::state::ConnectionState,
+) -> proto::ConnectionStatus {
     use crate::core::state::ConnectionState;
 
     let proto_state = match state {
@@ -650,10 +655,22 @@ mod tests {
 
     #[test]
     fn test_safety_mode_from_proto() {
-        assert_eq!(SafetyMode::from(proto::SafetyMode::Normal), SafetyMode::Normal);
-        assert_eq!(SafetyMode::from(proto::SafetyMode::ReadOnly), SafetyMode::ReadOnly);
-        assert_eq!(SafetyMode::from(proto::SafetyMode::Stage), SafetyMode::Stage);
-        assert_eq!(SafetyMode::from(proto::SafetyMode::Unspecified), SafetyMode::Normal);
+        assert_eq!(
+            SafetyMode::from(proto::SafetyMode::Normal),
+            SafetyMode::Normal
+        );
+        assert_eq!(
+            SafetyMode::from(proto::SafetyMode::ReadOnly),
+            SafetyMode::ReadOnly
+        );
+        assert_eq!(
+            SafetyMode::from(proto::SafetyMode::Stage),
+            SafetyMode::Stage
+        );
+        assert_eq!(
+            SafetyMode::from(proto::SafetyMode::Unspecified),
+            SafetyMode::Normal
+        );
     }
 
     // ========================================================================
@@ -663,15 +680,20 @@ mod tests {
     #[test]
     fn test_command_from_proto_create_link() {
         let cmd = proto::Command {
-            command: Some(proto::command::Command::CreateLink(proto::CreateLinkCommand {
-                output_port_id: 100,
-                input_port_id: 200,
-            })),
+            command: Some(proto::command::Command::CreateLink(
+                proto::CreateLinkCommand {
+                    output_port_id: 100,
+                    input_port_id: 200,
+                },
+            )),
         };
 
         let app_cmd = command_from_proto(&cmd).unwrap();
         match app_cmd {
-            AppCommand::CreateLink { output_port, input_port } => {
+            AppCommand::CreateLink {
+                output_port,
+                input_port,
+            } => {
                 assert_eq!(output_port.raw(), 100);
                 assert_eq!(input_port.raw(), 200);
             }
@@ -682,9 +704,9 @@ mod tests {
     #[test]
     fn test_command_from_proto_remove_link() {
         let cmd = proto::Command {
-            command: Some(proto::command::Command::RemoveLink(proto::RemoveLinkCommand {
-                link_id: 500,
-            })),
+            command: Some(proto::command::Command::RemoveLink(
+                proto::RemoveLinkCommand { link_id: 500 },
+            )),
         };
 
         let app_cmd = command_from_proto(&cmd).unwrap();
@@ -699,10 +721,12 @@ mod tests {
     #[test]
     fn test_command_from_proto_toggle_link() {
         let cmd = proto::Command {
-            command: Some(proto::command::Command::ToggleLink(proto::ToggleLinkCommand {
-                link_id: 500,
-                active: false,
-            })),
+            command: Some(proto::command::Command::ToggleLink(
+                proto::ToggleLinkCommand {
+                    link_id: 500,
+                    active: false,
+                },
+            )),
         };
 
         let app_cmd = command_from_proto(&cmd).unwrap();
@@ -718,10 +742,12 @@ mod tests {
     #[test]
     fn test_command_from_proto_set_volume() {
         let cmd = proto::Command {
-            command: Some(proto::command::Command::SetVolume(proto::SetVolumeCommand {
-                node_id: 42,
-                volume: 0.75,
-            })),
+            command: Some(proto::command::Command::SetVolume(
+                proto::SetVolumeCommand {
+                    node_id: 42,
+                    volume: 0.75,
+                },
+            )),
         };
 
         let app_cmd = command_from_proto(&cmd).unwrap();
@@ -767,7 +793,11 @@ mod tests {
 
         let app_cmd = command_from_proto(&cmd).unwrap();
         match app_cmd {
-            AppCommand::SetChannelVolume { node_id, channel, volume } => {
+            AppCommand::SetChannelVolume {
+                node_id,
+                channel,
+                volume,
+            } => {
                 assert_eq!(node_id.raw(), 42);
                 assert_eq!(channel, 1);
                 assert!((volume - 0.5).abs() < f32::EPSILON);
@@ -780,12 +810,16 @@ mod tests {
     fn test_command_from_proto_panic_commands_return_none() {
         // Panic commands are no longer supported
         let cmd = proto::Command {
-            command: Some(proto::command::Command::PanicMute(proto::PanicMuteCommand {})),
+            command: Some(proto::command::Command::PanicMute(
+                proto::PanicMuteCommand {},
+            )),
         };
         assert!(command_from_proto(&cmd).is_none());
 
         let cmd = proto::Command {
-            command: Some(proto::command::Command::PanicRestore(proto::PanicRestoreCommand {})),
+            command: Some(proto::command::Command::PanicRestore(
+                proto::PanicRestoreCommand {},
+            )),
         };
         assert!(command_from_proto(&cmd).is_none());
     }
@@ -857,7 +891,10 @@ mod tests {
 
     #[test]
     fn test_event_to_proto_reconnecting() {
-        let event = PwEvent::Reconnecting { attempt: 2, max_attempts: 5 };
+        let event = PwEvent::Reconnecting {
+            attempt: 2,
+            max_attempts: 5,
+        };
         let proto_event = event_to_proto(&event, 3, 3000).unwrap();
 
         match proto_event.event.unwrap() {
@@ -1110,7 +1147,10 @@ mod tests {
             (MediaClass::AudioVideoSource, "Audio/Video/Source"),
             (MediaClass::AudioDevice, "Audio/Device"),
             (MediaClass::VideoDevice, "Video/Device"),
-            (MediaClass::Other("Custom/Class".to_string()), "Custom/Class"),
+            (
+                MediaClass::Other("Custom/Class".to_string()),
+                "Custom/Class",
+            ),
         ];
 
         for (mc, expected) in classes {
@@ -1124,8 +1164,17 @@ mod tests {
 
     #[test]
     fn test_node_layer_to_proto() {
-        assert_eq!(node_layer_to_proto(&NodeLayer::Hardware), proto::NodeLayer::Hardware);
-        assert_eq!(node_layer_to_proto(&NodeLayer::Pipewire), proto::NodeLayer::Pipewire);
-        assert_eq!(node_layer_to_proto(&NodeLayer::Session), proto::NodeLayer::Session);
+        assert_eq!(
+            node_layer_to_proto(&NodeLayer::Hardware),
+            proto::NodeLayer::Hardware
+        );
+        assert_eq!(
+            node_layer_to_proto(&NodeLayer::Pipewire),
+            proto::NodeLayer::Pipewire
+        );
+        assert_eq!(
+            node_layer_to_proto(&NodeLayer::Session),
+            proto::NodeLayer::Session
+        );
     }
 }

@@ -274,7 +274,6 @@ impl NodeInfo {
             format,
         })
     }
-
 }
 
 /// Information about a PipeWire port.
@@ -334,7 +333,6 @@ impl PortInfo {
                 .unwrap_or(false),
         }
     }
-
 }
 
 /// Information about a PipeWire link.
@@ -426,7 +424,9 @@ impl ClientInfo {
                 .cloned()
                 .unwrap_or_else(|| format!("Client {}", id)),
             application_name: props.get("application.name").cloned(),
-            pid: props.get("application.process.id").and_then(|s| s.parse().ok()),
+            pid: props
+                .get("application.process.id")
+                .and_then(|s| s.parse().ok()),
         }
     }
 }

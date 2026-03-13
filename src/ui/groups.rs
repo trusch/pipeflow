@@ -99,7 +99,9 @@ impl GroupPanel {
     /// If multiple nodes have the same base display name, they get numbered suffixes.
     ///
     /// This should be called once per frame (or when nodes change) and passed to `show()`.
-    pub fn build_display_name_map<'a>(nodes: impl Iterator<Item = &'a Node>) -> HashMap<NodeId, String> {
+    pub fn build_display_name_map<'a>(
+        nodes: impl Iterator<Item = &'a Node>,
+    ) -> HashMap<NodeId, String> {
         // First pass: count occurrences of each base display name
         let mut name_counts: HashMap<String, Vec<NodeId>> = HashMap::new();
         for node in nodes {
@@ -143,13 +145,26 @@ impl GroupPanel {
         ui.horizontal(|ui| {
             // Color indicator
             let color = group.color.to_color32();
-            let (color_rect, painter) = ui.allocate_painter(egui::vec2(12.0, 12.0), egui::Sense::hover());
+            let (color_rect, painter) =
+                ui.allocate_painter(egui::vec2(12.0, 12.0), egui::Sense::hover());
             painter.rect_filled(color_rect.rect, 2.0, color);
             ui.add_space(4.0);
 
             // Collapse toggle
-            let collapse_text = if group.collapsed { egui_phosphor::regular::CARET_RIGHT } else { egui_phosphor::regular::CARET_DOWN };
-            if ui.small_button(collapse_text).on_hover_text(if group.collapsed { "Expand" } else { "Collapse" }).clicked() {
+            let collapse_text = if group.collapsed {
+                egui_phosphor::regular::CARET_RIGHT
+            } else {
+                egui_phosphor::regular::CARET_DOWN
+            };
+            if ui
+                .small_button(collapse_text)
+                .on_hover_text(if group.collapsed {
+                    "Expand"
+                } else {
+                    "Collapse"
+                })
+                .clicked()
+            {
                 panel_response.toggle_collapsed = Some(group_id);
             }
 
@@ -157,7 +172,7 @@ impl GroupPanel {
                 // Inline text edit
                 let text_edit = ui.add(
                     egui::TextEdit::singleline(&mut self.edit_buffer)
-                        .desired_width(ui.available_width() - 50.0)
+                        .desired_width(ui.available_width() - 50.0),
                 );
 
                 if text_edit.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -180,12 +195,13 @@ impl GroupPanel {
                 let name_response = ui.add(
                     egui::Label::new(&group.name)
                         .sense(egui::Sense::click())
-                        .truncate()
+                        .truncate(),
                 );
                 if name_response.clicked() {
                     panel_response.select_group_members = Some(group_id);
                 }
-                name_response.on_hover_text(format!("{}\n\nClick to select all members", &group.name));
+                name_response
+                    .on_hover_text(format!("{}\n\nClick to select all members", &group.name));
 
                 // Member count badge
                 let count = group.effective_member_count();
@@ -200,12 +216,20 @@ impl GroupPanel {
             // Action buttons - right aligned, consistent order: edit, delete
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Delete (rightmost)
-                if ui.small_button(egui_phosphor::regular::X).on_hover_text("Delete group").clicked() {
+                if ui
+                    .small_button(egui_phosphor::regular::X)
+                    .on_hover_text("Delete group")
+                    .clicked()
+                {
                     groups_to_remove.push(group_id);
                 }
 
                 // Edit/Rename
-                if ui.small_button(egui_phosphor::regular::PENCIL_SIMPLE).on_hover_text("Rename group").clicked() {
+                if ui
+                    .small_button(egui_phosphor::regular::PENCIL_SIMPLE)
+                    .on_hover_text("Rename group")
+                    .clicked()
+                {
                     self.editing_group = Some(group_id);
                     self.edit_buffer = group.name.clone();
                 }
@@ -229,15 +253,22 @@ impl GroupPanel {
                         let node_label = ui.add(
                             egui::Label::new(&name)
                                 .sense(egui::Sense::click())
-                                .truncate()
+                                .truncate(),
                         );
                         if node_label.clicked() {
                             panel_response.toggle_node_selection = Some((node_id, modifiers.shift));
                         }
-                        node_label.on_hover_text(format!("{}\n\nClick to select, Shift+click to add", &name));
+                        node_label.on_hover_text(format!(
+                            "{}\n\nClick to select, Shift+click to add",
+                            &name
+                        ));
 
                         // Remove button
-                        if ui.small_button(egui_phosphor::regular::X).on_hover_text("Remove from group").clicked() {
+                        if ui
+                            .small_button(egui_phosphor::regular::X)
+                            .on_hover_text("Remove from group")
+                            .clicked()
+                        {
                             panel_response.remove_from_group = Some((node_id, group_id));
                         }
                     });
@@ -246,7 +277,10 @@ impl GroupPanel {
                 if group.is_truly_empty() {
                     ui.weak("(empty)");
                 } else if group.is_pending_reconciliation() {
-                    ui.weak(format!("(waiting for {} nodes)", group.persistent_member_count()));
+                    ui.weak(format!(
+                        "(waiting for {} nodes)",
+                        group.persistent_member_count()
+                    ));
                 }
             });
         }

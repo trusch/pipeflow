@@ -39,7 +39,7 @@ impl Default for MeterStreamData {
     fn default() -> Self {
         Self {
             node_id: 0,
-            channels: 2,       // Default stereo; updated when stream format is negotiated
+            channels: 2, // Default stereo; updated when stream format is negotiated
             sample_rate: 48000, // Common default; updated from actual stream format
             peaks: vec![0.0; 2],
             rms: vec![0.0; 2],
@@ -53,7 +53,7 @@ impl MeterStreamData {
     fn new(node_id: NodeId) -> Self {
         Self {
             node_id: node_id.raw(),
-            channels: 2,       // Default stereo; updated when stream format is negotiated
+            channels: 2, // Default stereo; updated when stream format is negotiated
             sample_rate: 48000, // Common default; updated from actual stream format
             peaks: vec![0.0; 2],
             rms: vec![0.0; 2],
@@ -164,7 +164,8 @@ impl MeterStreamManager {
         serial: String,
         is_sink: bool,
     ) {
-        self.node_info.insert(node_id, NodeMeterInfo { serial, is_sink });
+        self.node_info
+            .insert(node_id, NodeMeterInfo { serial, is_sink });
         if self.auto_meter_all {
             self.start_metering(core, node_id);
         }
@@ -224,7 +225,11 @@ impl MeterStreamManager {
         match self.create_meter_stream(core, node_id, &info.serial, info.is_sink) {
             Some(handle) => {
                 self.streams.insert(node_id, handle);
-                tracing::debug!("Started metering node {:?} (is_sink={})", node_id, info.is_sink);
+                tracing::debug!(
+                    "Started metering node {:?} (is_sink={})",
+                    node_id,
+                    info.is_sink
+                );
                 true
             }
             None => {
@@ -264,7 +269,11 @@ impl MeterStreamManager {
     /// Restarts meter streams that haven't produced data recently.
     /// PipeWire streams can silently stop producing data when the audio graph
     /// is reconfigured (e.g., sample rate changes, device switches).
-    pub fn restart_stale_streams(&mut self, core: &pipewire::core::Core, stale_after: std::time::Duration) {
+    pub fn restart_stale_streams(
+        &mut self,
+        core: &pipewire::core::Core,
+        stale_after: std::time::Duration,
+    ) {
         let stale_ids: Vec<NodeId> = self
             .streams
             .iter()
@@ -449,7 +458,8 @@ impl MeterStreamManager {
                                 if num_frames > 0 {
                                     // Calculate levels for each channel by deinterleaving
                                     for ch in 0..channels {
-                                        let (peak, rms) = calculate_levels_interleaved(samples, ch, channels);
+                                        let (peak, rms) =
+                                            calculate_levels_interleaved(samples, ch, channels);
                                         data.update_levels(ch, peak, rms);
                                     }
                                 }
@@ -590,7 +600,11 @@ fn calculate_levels(samples: &[f32]) -> (f32, f32) {
 
 /// Calculates peak and RMS levels for a specific channel from interleaved audio samples.
 /// Interleaved format: [ch0_s0, ch1_s0, ch2_s0, ..., ch0_s1, ch1_s1, ch2_s1, ...]
-fn calculate_levels_interleaved(samples: &[f32], channel: usize, num_channels: usize) -> (f32, f32) {
+fn calculate_levels_interleaved(
+    samples: &[f32],
+    channel: usize,
+    num_channels: usize,
+) -> (f32, f32) {
     if samples.is_empty() || num_channels == 0 || channel >= num_channels {
         return (0.0, 0.0);
     }
@@ -652,8 +666,8 @@ mod tests {
         // Channel 2: 0.0, 0.0 (silence)
         // Channel 3: 0.8, 0.3 (peak 0.8)
         let samples = vec![
-            0.1, 0.5, 0.0, 0.8,  // frame 0
-            0.2, 0.5, 0.0, 0.3,  // frame 1
+            0.1, 0.5, 0.0, 0.8, // frame 0
+            0.2, 0.5, 0.0, 0.3, // frame 1
         ];
 
         let (peak0, _) = calculate_levels_interleaved(&samples, 0, 4);

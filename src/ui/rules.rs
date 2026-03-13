@@ -37,9 +37,21 @@ struct RuleMatchInfo {
 
 /// Format a MatchPattern as a compact display string.
 fn format_pattern(p: &MatchPattern) -> String {
-    let app = if p.app_name.is_empty() { "*" } else { &p.app_name };
-    let node = if p.node_name.is_empty() { "*" } else { &p.node_name };
-    let port = if p.port_name.is_empty() { "*" } else { &p.port_name };
+    let app = if p.app_name.is_empty() {
+        "*"
+    } else {
+        &p.app_name
+    };
+    let node = if p.node_name.is_empty() {
+        "*"
+    } else {
+        &p.node_name
+    };
+    let port = if p.port_name.is_empty() {
+        "*"
+    } else {
+        &p.port_name
+    };
     format!("{}:{}:{}", app, node, port)
 }
 
@@ -50,15 +62,17 @@ fn compute_match_info(rule: &ConnectionRule, graph: &GraphState) -> RuleMatchInf
     let mut total_active: usize = 0;
 
     for conn in &rule.connections {
-        let matched_outputs = find_matching_ports(&conn.output_pattern, PortDirection::Output, graph);
+        let matched_outputs =
+            find_matching_ports(&conn.output_pattern, PortDirection::Output, graph);
         let matched_inputs = find_matching_ports(&conn.input_pattern, PortDirection::Input, graph);
 
         let mut active_links = HashSet::new();
         for out in &matched_outputs {
             for inp in &matched_inputs {
-                let linked = graph.links.values().any(|l| {
-                    l.output_port == out.port_id && l.input_port == inp.port_id
-                });
+                let linked = graph
+                    .links
+                    .values()
+                    .any(|l| l.output_port == out.port_id && l.input_port == inp.port_id);
                 if linked {
                     active_links.insert((out.port_id, inp.port_id));
                 }
@@ -254,7 +268,11 @@ impl RulesPanel {
 
             // Right-aligned action buttons
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button(egui_phosphor::regular::X).on_hover_text("Delete rule").clicked() {
+                if ui
+                    .small_button(egui_phosphor::regular::X)
+                    .on_hover_text("Delete rule")
+                    .clicked()
+                {
                     rules_to_remove.push(rule_id);
                 }
 
@@ -266,11 +284,7 @@ impl RulesPanel {
                     panel_response.apply_rule = Some(rule_id);
                 }
 
-                if ui
-                    .small_button("✎")
-                    .on_hover_text("Rename rule")
-                    .clicked()
-                {
+                if ui.small_button("✎").on_hover_text("Rename rule").clicked() {
                     self.editing_rule = Some(rule_id);
                     self.edit_buffer = rule.name.clone();
                 }
@@ -296,19 +310,22 @@ impl RulesPanel {
 
             // Connection count with status
             let summary = if info.total_possible == 0 {
-                RichText::new(format!("{} specs (no matches)", rule.connections.len()))
-                    .weak()
+                RichText::new(format!("{} specs (no matches)", rule.connections.len())).weak()
             } else if info.total_active == info.total_possible {
                 RichText::new(format!(
                     "{} connections ({} active) {}",
-                    info.total_possible, info.total_active, egui_phosphor::regular::CHECK
+                    info.total_possible,
+                    info.total_active,
+                    egui_phosphor::regular::CHECK
                 ))
                 .color(Color32::from_rgb(0, 180, 120))
             } else {
                 let missing = info.total_possible - info.total_active;
                 RichText::new(format!(
                     "{} connections ({} missing) {}",
-                    info.total_possible, missing, egui_phosphor::regular::WARNING
+                    info.total_possible,
+                    missing,
+                    egui_phosphor::regular::WARNING
                 ))
                 .color(ui.visuals().warn_fg_color)
             };
@@ -413,9 +430,14 @@ impl RulesPanel {
             ui.horizontal(|ui| {
                 ui.add_space(32.0);
                 ui.label(
-                    RichText::new(format!("{}  {}  {}", src_node, egui_phosphor::regular::ARROW_RIGHT, dst_node))
-                        .small()
-                        .strong(),
+                    RichText::new(format!(
+                        "{}  {}  {}",
+                        src_node,
+                        egui_phosphor::regular::ARROW_RIGHT,
+                        dst_node
+                    ))
+                    .small()
+                    .strong(),
                 );
             });
 
@@ -423,13 +445,29 @@ impl RulesPanel {
             for entry in &ports {
                 ui.horizontal(|ui| {
                     ui.add_space(40.0);
-                    ui.label(RichText::new(egui_phosphor::regular::CIRCLE).small().color(green));
+                    ui.label(
+                        RichText::new(egui_phosphor::regular::CIRCLE)
+                            .small()
+                            .color(green),
+                    );
                     ui.label(RichText::new(&entry.out_port).small());
-                    ui.label(RichText::new(egui_phosphor::regular::ARROW_RIGHT).small().weak());
-                    ui.label(RichText::new(egui_phosphor::regular::CIRCLE).small().color(green));
+                    ui.label(
+                        RichText::new(egui_phosphor::regular::ARROW_RIGHT)
+                            .small()
+                            .weak(),
+                    );
+                    ui.label(
+                        RichText::new(egui_phosphor::regular::CIRCLE)
+                            .small()
+                            .color(green),
+                    );
                     ui.label(RichText::new(&entry.in_port).small());
                     if entry.linked {
-                        ui.label(RichText::new(egui_phosphor::regular::CHECK).small().color(green));
+                        ui.label(
+                            RichText::new(egui_phosphor::regular::CHECK)
+                                .small()
+                                .color(green),
+                        );
                     } else {
                         ui.label(RichText::new("\u{2014}").small().color(weak_color));
                     }

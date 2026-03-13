@@ -95,7 +95,11 @@ impl MeterSimulationState {
             // Smooth interpolation toward target (attack/decay envelope)
             let attack_rate = 0.3; // Fast attack
             let decay_rate = 0.08; // Slower decay
-            let rate = if *target > prev { attack_rate } else { decay_rate };
+            let rate = if *target > prev {
+                attack_rate
+            } else {
+                decay_rate
+            };
             let current = prev + ((*target - prev) * rate);
 
             // Add small noise for natural movement

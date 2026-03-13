@@ -182,14 +182,22 @@ impl Config {
             let contents = match std::fs::read_to_string(&path) {
                 Ok(c) => c,
                 Err(e) => {
-                    tracing::warn!("Failed to read config from {:?}: {}. Using defaults.", path, e);
+                    tracing::warn!(
+                        "Failed to read config from {:?}: {}. Using defaults.",
+                        path,
+                        e
+                    );
                     return Ok(Self::default());
                 }
             };
             match toml::from_str::<Config>(&contents) {
                 Ok(config) => Ok(config),
                 Err(e) => {
-                    tracing::warn!("Failed to parse config from {:?}: {}. Using defaults.", path, e);
+                    tracing::warn!(
+                        "Failed to parse config from {:?}: {}. Using defaults.",
+                        path,
+                        e
+                    );
                     Ok(Self::default())
                 }
             }
@@ -274,14 +282,22 @@ impl LayoutManager {
             let contents = match std::fs::read_to_string(&self.path) {
                 Ok(c) => c,
                 Err(e) => {
-                    tracing::warn!("Failed to read layout file {:?}: {}. Using defaults.", self.path, e);
+                    tracing::warn!(
+                        "Failed to read layout file {:?}: {}. Using defaults.",
+                        self.path,
+                        e
+                    );
                     return Ok(UiState::default());
                 }
             };
             match serde_json::from_str::<UiState>(&contents) {
                 Ok(state) => Ok(state),
                 Err(e) => {
-                    tracing::warn!("Failed to parse layout file {:?}: {}. Using defaults.", self.path, e);
+                    tracing::warn!(
+                        "Failed to parse layout file {:?}: {}. Using defaults.",
+                        self.path,
+                        e
+                    );
                     Ok(UiState::default())
                 }
             }

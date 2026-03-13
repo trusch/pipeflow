@@ -15,8 +15,12 @@ fn media_class_icon(media_class: Option<&MediaClass>) -> Option<&'static str> {
         Some(MediaClass::AudioSink) => Some(egui_phosphor::regular::SPEAKER_HIGH),
         Some(MediaClass::StreamInputAudio) => Some(egui_phosphor::regular::WAVEFORM),
         Some(MediaClass::StreamOutputAudio) => Some(egui_phosphor::regular::WAVEFORM),
-        Some(MediaClass::MidiSource) | Some(MediaClass::MidiSink) => Some(egui_phosphor::regular::PIANO_KEYS),
-        Some(MediaClass::VideoSource) | Some(MediaClass::VideoSink) | Some(MediaClass::VideoDevice) => Some(egui_phosphor::regular::MONITOR_PLAY),
+        Some(MediaClass::MidiSource) | Some(MediaClass::MidiSink) => {
+            Some(egui_phosphor::regular::PIANO_KEYS)
+        }
+        Some(MediaClass::VideoSource)
+        | Some(MediaClass::VideoSink)
+        | Some(MediaClass::VideoDevice) => Some(egui_phosphor::regular::MONITOR_PLAY),
         Some(MediaClass::AudioDevice) => Some(egui_phosphor::regular::SPEAKER_HIGH),
         Some(MediaClass::AudioVideoSource) => Some(egui_phosphor::regular::MONITOR_PLAY),
         _ => None,
@@ -123,7 +127,11 @@ fn truncate_text_measured(
 
 /// Measures the width of text using egui's font system.
 #[inline]
-fn measure_text_width(text: &str, font_id: &egui::FontId, fonts: &mut egui::epaint::text::FontsView<'_>) -> f32 {
+fn measure_text_width(
+    text: &str,
+    font_id: &egui::FontId,
+    fonts: &mut egui::epaint::text::FontsView<'_>,
+) -> f32 {
     let job = egui::text::LayoutJob::simple_singleline(
         text.to_string(),
         font_id.clone(),
@@ -230,7 +238,10 @@ impl GraphView {
     ) -> Option<Pos2> {
         let port = graph.get_port(port_id)?;
         let node = graph.get_node(&port.node_id)?;
-        let node_pos = node_positions.get(&port.node_id).copied().unwrap_or(Position::zero());
+        let node_pos = node_positions
+            .get(&port.node_id)
+            .copied()
+            .unwrap_or(Position::zero());
 
         // Check if this is a meter node (uses smaller width)
         let is_meter = is_metering_node(&node.name);
@@ -272,7 +283,8 @@ impl GraphView {
         };
 
         // Convert to screen coordinates
-        let screen_pos = transform.graph_to_screen(Pos2::new(port_x, port_y + theme.sizes.port_height * 0.5));
+        let screen_pos =
+            transform.graph_to_screen(Pos2::new(port_x, port_y + theme.sizes.port_height * 0.5));
         Some(screen_pos)
     }
 
@@ -449,7 +461,17 @@ impl GraphView {
             }
 
             let is_selected = selected_link == Some(link.id);
-            self.draw_link(ui, link, graph, node_positions, &transform, theme, mouse_pos, is_selected, is_link_uninteresting);
+            self.draw_link(
+                ui,
+                link,
+                graph,
+                node_positions,
+                &transform,
+                theme,
+                mouse_pos,
+                is_selected,
+                is_link_uninteresting,
+            );
         }
 
         // Reset hovered state before drawing nodes
@@ -552,7 +574,8 @@ impl GraphView {
         if let Some(ref drag) = self.creating_connection {
             // Snap to hovered port if compatible
             let snap_target = if let Some(port_id) = self.hovered_port {
-                let compatible = graph.get_port(&port_id)
+                let compatible = graph
+                    .get_port(&port_id)
                     .and_then(|target_port| {
                         let from_port = graph.get_port(&drag.from_port)?;
                         if from_port.can_connect_to(target_port) {
@@ -565,7 +588,13 @@ impl GraphView {
 
                 if compatible {
                     // Use unified port position calculation
-                    self.get_port_screen_position(&port_id, graph, node_positions, &transform, theme)
+                    self.get_port_screen_position(
+                        &port_id,
+                        graph,
+                        node_positions,
+                        &transform,
+                        theme,
+                    )
                 } else {
                     None
                 }
@@ -607,11 +636,12 @@ impl GraphView {
                             // Check compatibility: opposite directions, different nodes
                             if from_port.can_connect_to(target_port) {
                                 // Determine output -> input order
-                                let (output, input) = if drag.from_direction == PortDirection::Output {
-                                    (drag.from_port, target_port_id)
-                                } else {
-                                    (target_port_id, drag.from_port)
-                                };
+                                let (output, input) =
+                                    if drag.from_direction == PortDirection::Output {
+                                        (drag.from_port, target_port_id)
+                                    } else {
+                                        (target_port_id, drag.from_port)
+                                    };
                                 response.completed_connection = Some((output, input));
                             }
                         }
@@ -647,7 +677,19 @@ impl GraphView {
 
         // --- Minimap Overlay ---
         if show_minimap {
-            self.draw_minimap(ui, rect, graph, node_positions, hide_uninteresting, uninteresting_nodes, layer_visibility, filters, ports, theme, &transform);
+            self.draw_minimap(
+                ui,
+                rect,
+                graph,
+                node_positions,
+                hide_uninteresting,
+                uninteresting_nodes,
+                layer_visibility,
+                filters,
+                ports,
+                theme,
+                &transform,
+            );
         }
 
         response
@@ -737,8 +779,14 @@ impl GraphView {
             };
 
             let node_ports = graph.ports_for_node(&node.id);
-            let input_count = node_ports.iter().filter(|p| p.direction == PortDirection::Input).count();
-            let output_count = node_ports.iter().filter(|p| p.direction == PortDirection::Output).count();
+            let input_count = node_ports
+                .iter()
+                .filter(|p| p.direction == PortDirection::Input)
+                .count();
+            let output_count = node_ports
+                .iter()
+                .filter(|p| p.direction == PortDirection::Output)
+                .count();
             let max_ports = input_count.max(output_count);
             let meter_data = graph.meters.get(&node.id);
             let has_meter = meter_data.map(|m| m.max_peak() > 0.0).unwrap_or(false);
@@ -868,7 +916,13 @@ impl GraphView {
     }
 
     /// Shows the context menu for the graph (links and background only - nodes have their own menu).
-    fn show_context_menu(&self, ui: &mut Ui, graph: &GraphState, _uninteresting_nodes: &HashSet<NodeId>, response: &mut GraphViewResponse) {
+    fn show_context_menu(
+        &self,
+        ui: &mut Ui,
+        graph: &GraphState,
+        _uninteresting_nodes: &HashSet<NodeId>,
+        response: &mut GraphViewResponse,
+    ) {
         match self.context_menu_target {
             ContextMenuTarget::Link(link_id) => {
                 // Get link info to show current state
@@ -877,10 +931,12 @@ impl GraphView {
 
                 // Get link endpoint names for better display
                 let link_desc = if let Some(link) = link {
-                    let out_name = graph.get_node(&link.output_node)
+                    let out_name = graph
+                        .get_node(&link.output_node)
                         .map(|n| n.display_name().to_string())
                         .unwrap_or_else(|| "?".to_string());
-                    let in_name = graph.get_node(&link.input_node)
+                    let in_name = graph
+                        .get_node(&link.input_node)
                         .map(|n| n.display_name().to_string())
                         .unwrap_or_else(|| "?".to_string());
                     format!("{} -> {}", out_name, in_name)
@@ -893,7 +949,11 @@ impl GraphView {
                 ui.separator();
 
                 // Toggle active state
-                let toggle_label = if is_active { "Disable Link" } else { "Enable Link" };
+                let toggle_label = if is_active {
+                    "Disable Link"
+                } else {
+                    "Enable Link"
+                };
                 if ui.button(toggle_label).clicked() {
                     response.toggle_link = Some((link_id, !is_active));
                     ui.close();
@@ -908,7 +968,7 @@ impl GraphView {
                 // Node context menus are handled directly in draw_node
                 ui.label("Graph");
                 ui.separator();
-                if ui.button("Reset View").clicked() {
+                if ui.button("Fit All").clicked() {
                     // This would need to be handled by caller
                     ui.close();
                 }
@@ -937,14 +997,20 @@ impl GraphView {
         // Vertical lines
         let mut x = rect.left() + offset_x;
         while x < rect.right() {
-            painter.line_segment([Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())], stroke);
+            painter.line_segment(
+                [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
+                stroke,
+            );
             x += spacing;
         }
 
         // Horizontal lines
         let mut y = rect.top() + offset_y;
         while y < rect.bottom() {
-            painter.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], stroke);
+            painter.line_segment(
+                [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+                stroke,
+            );
             y += spacing;
         }
     }
@@ -1002,21 +1068,13 @@ impl GraphView {
             let base_color = group.color.to_color32();
 
             // Fill with very low alpha
-            let fill_color = Color32::from_rgba_unmultiplied(
-                base_color.r(),
-                base_color.g(),
-                base_color.b(),
-                25,
-            );
+            let fill_color =
+                Color32::from_rgba_unmultiplied(base_color.r(), base_color.g(), base_color.b(), 25);
             painter.rect_filled(group_rect, 8.0, fill_color);
 
             // Border stroke at medium alpha
-            let border_color = Color32::from_rgba_unmultiplied(
-                base_color.r(),
-                base_color.g(),
-                base_color.b(),
-                90,
-            );
+            let border_color =
+                Color32::from_rgba_unmultiplied(base_color.r(), base_color.g(), base_color.b(), 90);
             painter.rect_stroke(
                 group_rect,
                 8.0,
@@ -1061,14 +1119,11 @@ impl GraphView {
     ) {
         // Use smaller width for meter nodes
         let node_width = if is_meter {
-            theme.sizes.node_width * 0.55  // Meter nodes are 55% of normal width
+            theme.sizes.node_width * 0.55 // Meter nodes are 55% of normal width
         } else {
             theme.sizes.node_width
         };
-        let pos = positions
-            .get(&node.id)
-            .copied()
-            .unwrap_or(Position::zero());
+        let pos = positions.get(&node.id).copied().unwrap_or(Position::zero());
         let screen_pos = transform.graph_to_screen(Pos2::new(pos.x, pos.y));
 
         let ports = graph.ports_for_node(&node.id);
@@ -1096,10 +1151,7 @@ impl GraphView {
 
         let node_rect = Rect::from_min_size(
             screen_pos,
-            Vec2::new(
-                node_width * self.zoom,
-                node_height * self.zoom,
-            ),
+            Vec2::new(node_width * self.zoom, node_height * self.zoom),
         );
 
         let painter = ui.painter();
@@ -1213,11 +1265,16 @@ impl GraphView {
                     theme.sizes.node_header_height * self.zoom,
                 ),
             );
-            let header_color = dim_color(theme.header_color_for_media_class(node.media_class.as_ref()));
+            let header_color =
+                dim_color(theme.header_color_for_media_class(node.media_class.as_ref()));
             painter.rect_filled(header_rect, theme.sizes.node_rounding(), header_color);
 
             // Handle node interaction (always needed)
-            let node_response = ui.interact(node_rect, ui.id().with(node.id.raw()), Sense::click_and_drag());
+            let node_response = ui.interact(
+                node_rect,
+                ui.id().with(node.id.raw()),
+                Sense::click_and_drag(),
+            );
             if node_response.hovered() {
                 self.hovered_node = Some(node.id);
             }
@@ -1232,7 +1289,14 @@ impl GraphView {
             // Handle right-click context menu on node
             let node_id = node.id;
             node_response.context_menu(|ui| {
-                Self::show_node_context_menu(ui, node_id, graph, uninteresting_nodes, custom_names, response);
+                Self::show_node_context_menu(
+                    ui,
+                    node_id,
+                    graph,
+                    uninteresting_nodes,
+                    custom_names,
+                    response,
+                );
             });
 
             return;
@@ -1268,9 +1332,8 @@ impl GraphView {
         let font_size = base_font_size * self.zoom;
         let font_id = egui::FontId::proportional(font_size);
         let max_text_width = (node_width - 8.0) * self.zoom; // Leave padding
-        let truncated_name = ui.fonts_mut(|fonts| {
-            truncate_text_measured(name, max_text_width, &font_id, fonts)
-        });
+        let truncated_name =
+            ui.fonts_mut(|fonts| truncate_text_measured(name, max_text_width, &font_id, fonts));
         // Prepend media class icon if available
         let display_text = if let Some(icon) = media_class_icon(node.media_class.as_ref()) {
             format!("{} {}", icon, truncated_name)
@@ -1292,13 +1355,15 @@ impl GraphView {
             if let Some(meter) = meter_data {
                 let meter_rect = Rect::from_min_size(
                     Pos2::new(screen_pos.x + 4.0 * self.zoom, current_y + 2.0 * self.zoom),
-                    Vec2::new(
-                        (node_width - 8.0) * self.zoom,
-                        4.0 * self.zoom,
-                    ),
+                    Vec2::new((node_width - 8.0) * self.zoom, 4.0 * self.zoom),
                 );
                 let stale_threshold = std::time::Duration::from_millis(100);
-                self.draw_compact_meter(ui, meter_rect, meter.get_decayed_max_peak(stale_threshold), theme);
+                self.draw_compact_meter(
+                    ui,
+                    meter_rect,
+                    meter.get_decayed_max_peak(stale_threshold),
+                    theme,
+                );
                 current_y += meter_height * self.zoom;
             }
         }
@@ -1327,10 +1392,7 @@ impl GraphView {
             self.draw_port_with_lod(
                 ui,
                 port,
-                Pos2::new(
-                    screen_pos.x + node_width * self.zoom,
-                    port_y,
-                ),
+                Pos2::new(screen_pos.x + node_width * self.zoom, port_y),
                 false,
                 draw_port_labels,
                 node_width,
@@ -1348,25 +1410,38 @@ impl GraphView {
             egui::Pos2::new(node_rect.max.x - port_margin, node_rect.max.y),
         );
 
-        let node_response = ui.interact(body_rect, ui.id().with(node.id.raw()), Sense::click_and_drag());
+        let node_response = ui.interact(
+            body_rect,
+            ui.id().with(node.id.raw()),
+            Sense::click_and_drag(),
+        );
 
         if node_response.hovered() && self.hovered_port.is_none() {
             self.hovered_node = Some(node.id);
         }
 
         // Click to select (only if not on a port and no connection being created)
-        if node_response.clicked() && self.hovered_port.is_none() && response.started_connection.is_none() {
+        if node_response.clicked()
+            && self.hovered_port.is_none()
+            && response.started_connection.is_none()
+        {
             response.clicked_node = Some(node.id);
         }
 
         // Double-click to rename
-        if node_response.double_clicked() && self.hovered_port.is_none() && response.started_connection.is_none() {
+        if node_response.double_clicked()
+            && self.hovered_port.is_none()
+            && response.started_connection.is_none()
+        {
             response.rename_node = Some(node.id);
         }
 
         // Allow dragging any node for a natural feel
         // But only if we're not on a port and no connection is being started
-        if node_response.dragged() && self.hovered_port.is_none() && response.started_connection.is_none() {
+        if node_response.dragged()
+            && self.hovered_port.is_none()
+            && response.started_connection.is_none()
+        {
             response.dragged_node = Some((node.id, node_response.drag_delta() / self.zoom));
         }
 
@@ -1377,7 +1452,14 @@ impl GraphView {
         // Handle right-click context menu on node
         let node_id = node.id;
         node_response.context_menu(|ui| {
-            Self::show_node_context_menu(ui, node_id, graph, uninteresting_nodes, custom_names, response);
+            Self::show_node_context_menu(
+                ui,
+                node_id,
+                graph,
+                uninteresting_nodes,
+                custom_names,
+                response,
+            );
         });
     }
 
@@ -1394,7 +1476,11 @@ impl GraphView {
         let node_name = custom_names
             .get(&node_id)
             .cloned()
-            .or_else(|| graph.get_node(&node_id).map(|n| n.display_name().to_string()))
+            .or_else(|| {
+                graph
+                    .get_node(&node_id)
+                    .map(|n| n.display_name().to_string())
+            })
             .unwrap_or_else(|| format!("Node {:?}", node_id));
 
         let is_uninteresting = uninteresting_nodes.contains(&node_id);
@@ -1421,9 +1507,9 @@ impl GraphView {
 
         // Toggle uninteresting status
         let toggle_label = if is_uninteresting {
-            "Mark as Interesting"
+            "Bring Into Focus"
         } else {
-            "Mark as Uninteresting"
+            "Mark as Background"
         };
         if ui.button(toggle_label).clicked() {
             response.toggle_uninteresting = Some(vec![node_id]);
@@ -1439,16 +1525,23 @@ impl GraphView {
         ui.separator();
 
         // Show connections
-        let input_links: Vec<_> = graph.links.values()
+        let input_links: Vec<_> = graph
+            .links
+            .values()
             .filter(|l| l.input_node == node_id)
             .collect();
-        let output_links: Vec<_> = graph.links.values()
+        let output_links: Vec<_> = graph
+            .links
+            .values()
             .filter(|l| l.output_node == node_id)
             .collect();
 
         if !input_links.is_empty() || !output_links.is_empty() {
-            ui.label(format!("{} input, {} output connections",
-                input_links.len(), output_links.len()));
+            ui.label(format!(
+                "{} input, {} output connections",
+                input_links.len(),
+                output_links.len()
+            ));
             ui.separator();
         }
 
@@ -1463,7 +1556,7 @@ impl GraphView {
         // Only show "Save Connections as Rule" if there are connections
         if !input_links.is_empty() || !output_links.is_empty() {
             ui.separator();
-            if ui.button("Save Connections as Rule...").clicked() {
+            if ui.button("Save Auto Connect...").clicked() {
                 response.save_connections_as_rule = Some(node_id);
                 ui.close();
             }
@@ -1569,11 +1662,18 @@ impl GraphView {
             )
         } else {
             Rect::from_min_size(
-                Pos2::new(circle_center.x - radius * 1.5 - label_width, circle_center.y - radius * 1.25),
+                Pos2::new(
+                    circle_center.x - radius * 1.5 - label_width,
+                    circle_center.y - radius * 1.25,
+                ),
                 Vec2::new(radius * 2.5 + label_width, radius * 2.5),
             )
         };
-        let port_response = ui.interact(port_rect, ui.id().with(port.id.raw()), Sense::click_and_drag());
+        let port_response = ui.interact(
+            port_rect,
+            ui.id().with(port.id.raw()),
+            Sense::click_and_drag(),
+        );
 
         // Check hover and drag states before consuming the response
         let is_hovered = port_response.hovered();
@@ -1611,20 +1711,50 @@ impl GraphView {
             // Thresholds: red >= 0.9 (~-1dB), yellow >= 0.7 (~-3dB), green < 0.7
             let (base_color, dim_color) = if segment_start >= 1.0 {
                 // Clip zone (bright red) - signal exceeds 0dB
-                (Color32::from_rgb(255, 60, 60), Color32::from_rgba_unmultiplied(60, 15, 15, 80))
+                (
+                    Color32::from_rgb(255, 60, 60),
+                    Color32::from_rgba_unmultiplied(60, 15, 15, 80),
+                )
             } else if segment_start >= 0.9 {
                 // Red zone - approaching clipping (~-1dB to 0dB)
-                (theme.meter.high, Color32::from_rgba_unmultiplied(theme.meter.high.r() / 5, theme.meter.high.g() / 5, theme.meter.high.b() / 5, 60))
+                (
+                    theme.meter.high,
+                    Color32::from_rgba_unmultiplied(
+                        theme.meter.high.r() / 5,
+                        theme.meter.high.g() / 5,
+                        theme.meter.high.b() / 5,
+                        60,
+                    ),
+                )
             } else if segment_start >= 0.7 {
                 // Yellow zone - elevated levels (~-3dB to -1dB)
-                (theme.meter.mid, Color32::from_rgba_unmultiplied(theme.meter.mid.r() / 5, theme.meter.mid.g() / 5, theme.meter.mid.b() / 5, 60))
+                (
+                    theme.meter.mid,
+                    Color32::from_rgba_unmultiplied(
+                        theme.meter.mid.r() / 5,
+                        theme.meter.mid.g() / 5,
+                        theme.meter.mid.b() / 5,
+                        60,
+                    ),
+                )
             } else {
                 // Green zone - normal levels (< -3dB)
-                (theme.meter.low, Color32::from_rgba_unmultiplied(theme.meter.low.r() / 5, theme.meter.low.g() / 5, theme.meter.low.b() / 5, 60))
+                (
+                    theme.meter.low,
+                    Color32::from_rgba_unmultiplied(
+                        theme.meter.low.r() / 5,
+                        theme.meter.low.g() / 5,
+                        theme.meter.low.b() / 5,
+                        60,
+                    ),
+                )
             };
 
             let segment_rect = Rect::from_min_size(
-                Pos2::new(rect.min.x + i as f32 * segment_width + gap / 2.0, rect.min.y),
+                Pos2::new(
+                    rect.min.x + i as f32 * segment_width + gap / 2.0,
+                    rect.min.y,
+                ),
                 Vec2::new((segment_width - gap).max(1.0), rect.height()),
             );
 
@@ -1635,10 +1765,18 @@ impl GraphView {
                 // Partially lit - show as dimmed transitioning to lit
                 let partial = (level - segment_start) / (segment_end - segment_start);
                 let color = Color32::from_rgba_unmultiplied(
-                    (dim_color.r() as f32 + (base_color.r() as f32 - dim_color.r() as f32) * partial) as u8,
-                    (dim_color.g() as f32 + (base_color.g() as f32 - dim_color.g() as f32) * partial) as u8,
-                    (dim_color.b() as f32 + (base_color.b() as f32 - dim_color.b() as f32) * partial) as u8,
-                    (dim_color.a() as f32 + (base_color.a() as f32 - dim_color.a() as f32) * partial) as u8,
+                    (dim_color.r() as f32
+                        + (base_color.r() as f32 - dim_color.r() as f32) * partial)
+                        as u8,
+                    (dim_color.g() as f32
+                        + (base_color.g() as f32 - dim_color.g() as f32) * partial)
+                        as u8,
+                    (dim_color.b() as f32
+                        + (base_color.b() as f32 - dim_color.b() as f32) * partial)
+                        as u8,
+                    (dim_color.a() as f32
+                        + (base_color.a() as f32 - dim_color.a() as f32) * partial)
+                        as u8,
                 );
                 painter.rect_filled(segment_rect, 0.0, color);
             } else {
@@ -1655,7 +1793,11 @@ impl GraphView {
                 Pos2::new(rect.max.x - segment_width * 2.0, rect.min.y),
                 Vec2::new(segment_width * 2.0, rect.height()),
             );
-            painter.rect_filled(clip_rect, 0.0, Color32::from_rgba_unmultiplied(255, 50, 50, clip_alpha));
+            painter.rect_filled(
+                clip_rect,
+                0.0,
+                Color32::from_rgba_unmultiplied(255, 50, 50, clip_alpha),
+            );
         }
     }
 
@@ -1674,11 +1816,23 @@ impl GraphView {
         is_uninteresting: bool,
     ) {
         // Get port positions using the unified calculation
-        let from_pos = match self.get_port_screen_position(&link.output_port, graph, positions, transform, theme) {
+        let from_pos = match self.get_port_screen_position(
+            &link.output_port,
+            graph,
+            positions,
+            transform,
+            theme,
+        ) {
             Some(pos) => pos,
             None => return,
         };
-        let to_pos = match self.get_port_screen_position(&link.input_port, graph, positions, transform, theme) {
+        let to_pos = match self.get_port_screen_position(
+            &link.input_port,
+            graph,
+            positions,
+            transform,
+            theme,
+        ) {
             Some(pos) => pos,
             None => return,
         };
@@ -1693,7 +1847,8 @@ impl GraphView {
             if let Some(node_pos) = positions.get(&link.output_node) {
                 let node_screen_pos = transform.graph_to_screen(Pos2::new(node_pos.x, node_pos.y));
                 // Estimate node height (ports are distributed vertically)
-                let node_height = graph.get_node(&link.output_node)
+                let node_height = graph
+                    .get_node(&link.output_node)
                     .map(|n| n.port_ids.len() as f32 * 20.0 * self.zoom + 40.0 * self.zoom)
                     .unwrap_or(100.0 * self.zoom);
                 let node_center_y = node_screen_pos.y + node_height / 2.0;
@@ -1757,7 +1912,7 @@ impl GraphView {
             // Uses a desaturated, lower contrast color with slight transparency
             let base = theme.wire.audio;
             let faded = Color32::from_rgba_unmultiplied(
-                ((base.r() as u16 + 80) / 2) as u8,  // Shift toward grey
+                ((base.r() as u16 + 80) / 2) as u8, // Shift toward grey
                 ((base.g() as u16 + 80) / 2) as u8,
                 ((base.b() as u16 + 80) / 2) as u8,
                 160, // Slightly transparent but more visible than disabled
@@ -1768,7 +1923,7 @@ impl GraphView {
             let base_color = match color_hint {
                 2 => Color32::from_rgb(255, 80, 80),   // Red (clipping)
                 1 => Color32::from_rgb(255, 220, 100), // Yellow (elevated)
-                _ => theme.meter.low,                   // Green (normal)
+                _ => theme.meter.low,                  // Green (normal)
             };
             // Interpolate between base wire color and flow color based on intensity
             let wire_color = if flow_intensity > 0.01 {
@@ -1780,20 +1935,26 @@ impl GraphView {
         };
 
         // Choose the appropriate drawing function based on whether this is a self-link
-        let draw_wire = |s: &Self, ui: &mut Ui, from: Pos2, to: Pos2, color: Color32, thickness: f32| {
-            if is_self_link {
-                s.draw_self_link_bezier(ui, from, to, color, thickness, self_link_goes_up);
-            } else {
-                s.draw_bezier_wire(ui, from, to, color, thickness);
-            }
-        };
+        let draw_wire =
+            |s: &Self, ui: &mut Ui, from: Pos2, to: Pos2, color: Color32, thickness: f32| {
+                if is_self_link {
+                    s.draw_self_link_bezier(ui, from, to, color, thickness, self_link_goes_up);
+                } else {
+                    s.draw_bezier_wire(ui, from, to, color, thickness);
+                }
+            };
 
         // Draw flow glow layer first (underneath) for active links with activity
         // Skip glow for uninteresting links to keep them visually subdued
-        if link.is_active && flow_intensity > 0.01 && !is_selected && !is_hovered && !is_uninteresting {
+        if link.is_active
+            && flow_intensity > 0.01
+            && !is_selected
+            && !is_hovered
+            && !is_uninteresting
+        {
             let glow_alpha = (flow_intensity * 80.0) as u8;
             let glow_color = match color_hint {
-                2 => Color32::from_rgba_unmultiplied(255, 80, 80, glow_alpha),   // Red glow
+                2 => Color32::from_rgba_unmultiplied(255, 80, 80, glow_alpha), // Red glow
                 1 => Color32::from_rgba_unmultiplied(255, 220, 100, glow_alpha), // Yellow glow
                 _ => Color32::from_rgba_unmultiplied(100, 255, 100, glow_alpha), // Green glow
             };
@@ -1816,8 +1977,21 @@ impl GraphView {
 
         // Draw traveling pulse for high-activity links (only at Full LOD and high activity)
         // Skip for self-links as the pulse animation doesn't work well with the looping curve
-        if link.is_active && flow_intensity > 0.2 && self.zoom > 0.5 && !is_selected && !is_hovered && !is_self_link {
-            self.draw_flow_pulse(ui, from_pos, to_pos, pulse_phase, flow_intensity, color_hint);
+        if link.is_active
+            && flow_intensity > 0.2
+            && self.zoom > 0.5
+            && !is_selected
+            && !is_hovered
+            && !is_self_link
+        {
+            self.draw_flow_pulse(
+                ui,
+                from_pos,
+                to_pos,
+                pulse_phase,
+                flow_intensity,
+                color_hint,
+            );
         }
     }
 
@@ -1889,7 +2063,14 @@ impl GraphView {
 
     /// Tests if a point is near a self-link bezier curve.
     /// `go_up`: if true, loops above the ports; if false, loops below.
-    fn point_near_self_link_bezier(&self, point: Pos2, from: Pos2, to: Pos2, tolerance: f32, go_up: bool) -> bool {
+    fn point_near_self_link_bezier(
+        &self,
+        point: Pos2,
+        from: Pos2,
+        to: Pos2,
+        tolerance: f32,
+        go_up: bool,
+    ) -> bool {
         // Use the same bezier calculation as draw_self_link_bezier
         let horizontal_dist = (from.x - to.x).abs();
         let loop_height = (horizontal_dist * 0.4).max(40.0 * self.zoom);
@@ -1949,7 +2130,15 @@ impl GraphView {
 
     /// Draws a self-link as a bezier curve that loops around.
     /// `go_up`: if true, loops above the ports; if false, loops below.
-    fn draw_self_link_bezier(&self, ui: &mut Ui, from: Pos2, to: Pos2, color: Color32, thickness: f32, go_up: bool) {
+    fn draw_self_link_bezier(
+        &self,
+        ui: &mut Ui,
+        from: Pos2,
+        to: Pos2,
+        color: Color32,
+        thickness: f32,
+        go_up: bool,
+    ) {
         let painter = ui.painter();
 
         // from = output port (right side), to = input port (left side)
@@ -2007,7 +2196,13 @@ impl GraphView {
         theme: &Theme,
     ) {
         // Get starting port position using the unified calculation
-        let from_pos = match self.get_port_screen_position(&drag.from_port, graph, positions, transform, theme) {
+        let from_pos = match self.get_port_screen_position(
+            &drag.from_port,
+            graph,
+            positions,
+            transform,
+            theme,
+        ) {
             Some(pos) => pos,
             None => return,
         };
@@ -2043,10 +2238,7 @@ impl GraphView {
         let mut selected = Vec::new();
 
         for node in graph.nodes.values() {
-            let pos = positions
-                .get(&node.id)
-                .copied()
-                .unwrap_or(Position::zero());
+            let pos = positions.get(&node.id).copied().unwrap_or(Position::zero());
             let screen_pos = transform.graph_to_screen(Pos2::new(pos.x, pos.y));
 
             // Use correct width for meter nodes
@@ -2059,8 +2251,14 @@ impl GraphView {
 
             // Compute real height matching draw_node
             let ports = graph.ports_for_node(&node.id);
-            let input_count = ports.iter().filter(|p| p.direction == PortDirection::Input).count();
-            let output_count = ports.iter().filter(|p| p.direction == PortDirection::Output).count();
+            let input_count = ports
+                .iter()
+                .filter(|p| p.direction == PortDirection::Input)
+                .count();
+            let output_count = ports
+                .iter()
+                .filter(|p| p.direction == PortDirection::Output)
+                .count();
             let max_ports = input_count.max(output_count);
 
             let meter_data = graph.meters.get(&node.id);
@@ -2074,10 +2272,7 @@ impl GraphView {
 
             let node_rect = Rect::from_min_size(
                 screen_pos,
-                Vec2::new(
-                    node_width * self.zoom,
-                    node_height * self.zoom,
-                ),
+                Vec2::new(node_width * self.zoom, node_height * self.zoom),
             );
 
             // Check if node intersects with selection rectangle

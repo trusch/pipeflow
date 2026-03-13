@@ -59,11 +59,13 @@ impl FilterPredicate {
                 .as_ref()
                 .map(|n| n.to_lowercase().contains(&name.to_lowercase()))
                 .unwrap_or(false),
-            Self::NodeName(name) => node.name.to_lowercase().contains(&name.to_lowercase())
-                || node
-                    .display_name()
-                    .to_lowercase()
-                    .contains(&name.to_lowercase()),
+            Self::NodeName(name) => {
+                node.name.to_lowercase().contains(&name.to_lowercase())
+                    || node
+                        .display_name()
+                        .to_lowercase()
+                        .contains(&name.to_lowercase())
+            }
             Self::ActiveOnly => node.is_active,
             Self::AudioOnly => node
                 .media_class
@@ -89,12 +91,9 @@ impl FilterPredicate {
         match self {
             Self::Direction(dir) => {
                 // Check if the node has any ports with the specified direction
-                node.port_ids.iter().any(|pid| {
-                    ports
-                        .get(pid)
-                        .map(|p| p.direction == *dir)
-                        .unwrap_or(false)
-                })
+                node.port_ids
+                    .iter()
+                    .any(|pid| ports.get(pid).map(|p| p.direction == *dir).unwrap_or(false))
             }
             _ => self.matches(node),
         }
@@ -172,7 +171,10 @@ impl FilterSet {
 
         // Check include filters (if any)
         if !self.include.is_empty() {
-            let matches_any = self.include.iter().any(|p| p.matches_with_ports(node, ports));
+            let matches_any = self
+                .include
+                .iter()
+                .any(|p| p.matches_with_ports(node, ports));
             if !matches_any {
                 return false;
             }
@@ -438,17 +440,20 @@ mod tests {
         node.port_ids = vec![PortId::new(10)];
 
         let mut ports = HashMap::new();
-        ports.insert(PortId::new(10), Port {
-            id: PortId::new(10),
-            node_id: NodeId::new(1),
-            name: "in".into(),
-            direction: PortDirection::Input,
-            channel: None,
-            physical_path: None,
-            alias: None,
-            is_monitor: false,
-            is_control: false,
-        });
+        ports.insert(
+            PortId::new(10),
+            Port {
+                id: PortId::new(10),
+                node_id: NodeId::new(1),
+                name: "in".into(),
+                direction: PortDirection::Input,
+                channel: None,
+                physical_path: None,
+                alias: None,
+                is_monitor: false,
+                is_control: false,
+            },
+        );
 
         assert!(predicate.matches_with_ports(&node, &ports));
 

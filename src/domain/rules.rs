@@ -93,9 +93,7 @@ impl MatchPattern {
         }
         glob_match::glob_match(pattern, text)
     }
-
 }
-
 
 /// A single port-to-port connection specification within a rule.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

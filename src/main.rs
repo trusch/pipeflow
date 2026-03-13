@@ -204,11 +204,9 @@ fn run_remote_gui(addr: &str, token: Option<String>) -> Result<(), String> {
 /// Initializes the logging system.
 fn init_logging(verbose: bool) {
     let filter = if verbose {
-        EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("pipeflow=debug,info"))
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("pipeflow=debug,info"))
     } else {
-        EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("pipeflow=info,warn"))
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("pipeflow=info,warn"))
     };
 
     tracing_subscriber::registry()

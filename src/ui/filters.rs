@@ -18,10 +18,14 @@ impl FilterPanel {
 
         // Search box
         ui.horizontal(|ui| {
-            ui.label("Search:");
+            ui.label("Focus:");
             let mut search = filters.search.clone().unwrap_or_default();
             if ui.text_edit_singleline(&mut search).changed() {
-                filters.set_search(if search.is_empty() { None } else { Some(search) });
+                filters.set_search(if search.is_empty() {
+                    None
+                } else {
+                    Some(search)
+                });
                 response.changed = true;
             }
             help_button(ui, "filters", "search_filter");
@@ -31,7 +35,7 @@ impl FilterPanel {
 
         // Quick filters
         ui.horizontal(|ui| {
-            ui.label("Quick Filters:");
+            ui.label("Quick focus:");
             help_button(ui, "filters", "media_type_filters");
         });
 
@@ -73,7 +77,10 @@ impl FilterPanel {
                 let is_active = filters.include.contains(&predicate);
 
                 let mut active = is_active;
-                if ui.checkbox(&mut active, media_class.display_name()).changed() {
+                if ui
+                    .checkbox(&mut active, media_class.display_name())
+                    .changed()
+                {
                     if active {
                         filters.add_include(predicate);
                     } else {
@@ -88,7 +95,7 @@ impl FilterPanel {
 
         // Clear filters
         ui.horizontal(|ui| {
-            if ui.button("Clear All").clicked() {
+            if ui.button("Clear Focus").clicked() {
                 filters.clear();
                 response.changed = true;
             }
@@ -108,7 +115,12 @@ impl FilterPanel {
     }
 
     /// Shows a toggle chip for a quick filter.
-    fn toggle_chip(ui: &mut Ui, filters: &mut FilterSet, label: &str, predicate: FilterPredicate) -> bool {
+    fn toggle_chip(
+        ui: &mut Ui,
+        filters: &mut FilterSet,
+        label: &str,
+        predicate: FilterPredicate,
+    ) -> bool {
         let is_active = filters.include.contains(&predicate);
 
         let button = if is_active {
@@ -145,9 +157,7 @@ impl FilterPanel {
 
     /// Counts active filters.
     fn count_active(filters: &FilterSet) -> usize {
-        filters.include.len()
-            + filters.exclude.len()
-            + if filters.search.is_some() { 1 } else { 0 }
+        filters.include.len() + filters.exclude.len() + if filters.search.is_some() { 1 } else { 0 }
     }
 }
 

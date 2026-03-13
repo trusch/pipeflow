@@ -64,7 +64,6 @@ impl SafetyCheckResult {
     }
 }
 
-
 /// Controller for safety features.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SafetyController {

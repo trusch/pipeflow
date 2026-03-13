@@ -27,11 +27,7 @@ impl SnapshotPanel {
     }
 
     /// Shows the snapshot panel and returns any requested actions.
-    pub fn show(
-        &mut self,
-        ui: &mut Ui,
-        manager: &SnapshotManager,
-    ) -> SnapshotPanelResponse {
+    pub fn show(&mut self, ui: &mut Ui, manager: &SnapshotManager) -> SnapshotPanelResponse {
         let mut response = SnapshotPanelResponse::default();
 
         // Save snapshot section
@@ -44,7 +40,10 @@ impl SnapshotPanel {
 
             let can_save = !self.name_input.trim().is_empty();
             let save_clicked = ui
-                .add_enabled(can_save, egui::Button::new(format!("{} Save", egui_phosphor::regular::FLOPPY_DISK)))
+                .add_enabled(
+                    can_save,
+                    egui::Button::new(format!("{} Save", egui_phosphor::regular::FLOPPY_DISK)),
+                )
                 .clicked();
 
             // Also save on Enter

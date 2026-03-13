@@ -1,6 +1,6 @@
 //! Performance benchmarks for graph operations.
 
-use criterion::{criterion_group, criterion_main, Criterion, black_box};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use pipeflow::core::state::GraphState;
 use pipeflow::domain::graph::{Link, Node, Port, PortDirection};
@@ -108,7 +108,9 @@ fn bench_filter_200_nodes(c: &mut Criterion) {
 
     c.bench_function("filter_200_nodes_audio_only", |b| {
         b.iter(|| {
-            let count = graph.nodes.values()
+            let count = graph
+                .nodes
+                .values()
                 .filter(|n| filters.matches_with_ports(n, &graph.ports))
                 .count();
             black_box(count);

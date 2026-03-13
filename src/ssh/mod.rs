@@ -66,11 +66,10 @@ impl SshTunnel {
             .arg("ExitOnForwardFailure=yes");
 
         // Port forwarding: local_port -> remote:remote_port
-        cmd.arg("-L")
-            .arg(format!(
-                "{}:127.0.0.1:{}",
-                self.local_port, self.remote_port
-            ));
+        cmd.arg("-L").arg(format!(
+            "{}:127.0.0.1:{}",
+            self.local_port, self.remote_port
+        ));
 
         // SSH port if non-standard
         if self.ssh_port != 22 {
@@ -102,7 +101,11 @@ impl SshTunnel {
         if let Some(ref mut process) = self.process {
             match process.try_wait()? {
                 Some(status) => {
-                    return Err(format!("SSH tunnel failed to start: exit code {:?}", status.code()).into());
+                    return Err(format!(
+                        "SSH tunnel failed to start: exit code {:?}",
+                        status.code()
+                    )
+                    .into());
                 }
                 None => {
                     tracing::info!(
@@ -164,7 +167,6 @@ impl SshTunnel {
 
         Ok(())
     }
-
 }
 
 #[cfg(feature = "network")]

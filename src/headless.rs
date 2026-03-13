@@ -50,8 +50,8 @@ pub async fn run_headless(
     let state = create_shared_state();
 
     // Initialize PipeWire connection
-    let pw_connection = PwConnection::new()
-        .map_err(|e| format!("Failed to create PipeWire connection: {}", e))?;
+    let pw_connection =
+        PwConnection::new().map_err(|e| format!("Failed to create PipeWire connection: {}", e))?;
     let command_handler = Arc::new(CommandHandler::new(pw_connection.command_tx.clone()));
 
     // Set initial safety mode from config
@@ -153,7 +153,10 @@ fn process_event(state: &mut crate::core::state::AppState, event: &PwEvent) {
             state.clear_graph();
             tracing::warn!("Disconnected from PipeWire");
         }
-        PwEvent::Reconnecting { attempt, max_attempts } => {
+        PwEvent::Reconnecting {
+            attempt,
+            max_attempts,
+        } => {
             state.connection = ConnectionState::Connecting;
             tracing::info!(
                 "Reconnecting to PipeWire (attempt {}/{})",
@@ -185,7 +188,9 @@ fn process_event(state: &mut crate::core::state::AppState, event: &PwEvent) {
             let identifier = NodeIdentifier::new(
                 info.name.clone(),
                 info.application_name.clone(),
-                info.media_class.as_ref().map(|mc| mc.display_name().to_string()),
+                info.media_class
+                    .as_ref()
+                    .map(|mc| mc.display_name().to_string()),
             );
 
             // Restore position if saved, otherwise calculate using centralized layout
@@ -199,10 +204,15 @@ fn process_event(state: &mut crate::core::state::AppState, event: &PwEvent) {
                     Position::zero(), // Center at origin for headless mode
                 );
                 state.ui.node_positions.insert(info.id, position);
-                state.ui.persistent_positions.insert(identifier.clone(), position);
+                state
+                    .ui
+                    .persistent_positions
+                    .insert(identifier.clone(), position);
             }
 
-            state.ui.restore_uninteresting_for_node(info.id, &identifier);
+            state
+                .ui
+                .restore_uninteresting_for_node(info.id, &identifier);
             state.ui.groups.reconcile_node(info.id, &identifier);
         }
         PwEvent::NodeRemoved(id) => {

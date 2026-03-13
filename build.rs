@@ -12,7 +12,10 @@ fn main() {
             .build_server(true)
             .build_client(true)
             // Suppress clippy warnings for generated code
-            .type_attribute(".", "#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]")
+            .type_attribute(
+                ".",
+                "#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]",
+            )
             .compile_protos(&[proto_file], &["src/network/proto"])
             .expect("Failed to compile protobuf definitions");
     }

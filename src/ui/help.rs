@@ -135,13 +135,7 @@ impl HelpPanel {
 
         ui.add_space(12.0);
 
-        help_section(
-            ui,
-            "general",
-            "Interface",
-            &["connection_status"],
-            false,
-        );
+        help_section(ui, "general", "Interface", &["connection_status"], false);
     }
 
     fn show_shortcuts(&self, ui: &mut Ui) {
@@ -215,7 +209,11 @@ impl HelpPanel {
             ui,
             "safety",
             "Safety Modes",
-            &["safety_mode_normal", "safety_mode_readonly", "safety_mode_stage"],
+            &[
+                "safety_mode_normal",
+                "safety_mode_readonly",
+                "safety_mode_stage",
+            ],
             false,
         );
 
@@ -225,7 +223,12 @@ impl HelpPanel {
             ui,
             "filters",
             "Filtering",
-            &["filters_overview", "search_filter", "media_type_filters", "combining_filters"],
+            &[
+                "filters_overview",
+                "search_filter",
+                "media_type_filters",
+                "combining_filters",
+            ],
             false,
         );
 
@@ -245,7 +248,11 @@ impl HelpPanel {
             ui,
             "snapshots",
             "Snapshots",
-            &["snapshots_overview", "what_gets_saved", "restoring_snapshots"],
+            &[
+                "snapshots_overview",
+                "what_gets_saved",
+                "restoring_snapshots",
+            ],
             false,
         );
 
@@ -275,7 +282,11 @@ impl HelpPanel {
             ui,
             "audio",
             "Volume & Metering",
-            &["volume_control", "understanding_meters", "link_flow_visualization"],
+            &[
+                "volume_control",
+                "understanding_meters",
+                "link_flow_visualization",
+            ],
             true,
         );
 
@@ -306,17 +317,16 @@ impl HelpPanel {
                     // Check if entry matches search
                     let matches = entry.title.to_lowercase().contains(&query)
                         || entry.content.to_lowercase().contains(&query)
-                        || entry.tip.as_ref().is_some_and(|t| t.to_lowercase().contains(&query));
+                        || entry
+                            .tip
+                            .as_ref()
+                            .is_some_and(|t| t.to_lowercase().contains(&query));
 
                     if matches {
                         found = true;
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(format!("[{}]", category_name))
-                                    .small()
-                                    .weak(),
-                            );
+                            ui.label(RichText::new(format!("[{}]", category_name)).small().weak());
                         });
                         show_help_entry(ui, entry);
                         ui.separator();

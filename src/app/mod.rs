@@ -17,8 +17,10 @@ mod ui_panels;
 
 use crate::core::commands::{AppCommand, CommandHandler, CommandRegistry, UiCommand};
 use crate::core::config::Config;
+use crate::core::config::ThemePreference;
 use crate::core::history::{UndoAction, UndoEntry, UndoStack};
 use crate::core::state::SharedState;
+use crate::domain::snapshots::SnapshotManager;
 use crate::pipewire::connection::PwConnection;
 use crate::pipewire::meters::MeterCollector;
 use crate::ui::command_palette::CommandPalette;
@@ -29,10 +31,8 @@ use crate::ui::help::show_help;
 use crate::ui::node_panel::NodePanel;
 use crate::ui::rules::RulesPanel;
 use crate::ui::settings::SettingsPanel;
-use crate::ui::snapshots::SnapshotPanel;
-use crate::domain::snapshots::SnapshotManager;
 use crate::ui::sidebar::{SidebarState, MAX_WIDTH, MIN_WIDTH};
-use crate::core::config::ThemePreference;
+use crate::ui::snapshots::SnapshotPanel;
 use crate::ui::theme::Theme;
 use crate::ui::toolbar::Toolbar;
 use crate::util::id::{NodeId, NodeIdentifier};
@@ -59,8 +59,64 @@ impl RenameNodeDialog {
         self.node_id = None;
         self.input.clear();
     }
+}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkspaceSection {
+    Patch,
+    AutoConnect,
+    SavedSetups,
+}
 
+impl WorkspaceSection {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Patch => "Patch",
+            Self::AutoConnect => "Auto Connect",
+            Self::SavedSetups => "Saved Setups",
+        }
+    }
+
+    fn icon(self) -> &'static str {
+        match self {
+            Self::Patch => egui_phosphor::regular::FLOW_ARROW,
+            Self::AutoConnect => egui_phosphor::regular::LINK,
+            Self::SavedSetups => egui_phosphor::regular::BOOKMARK_SIMPLE,
+        }
+    }
+
+    fn summary(self) -> &'static str {
+        match self {
+            Self::Patch => {
+                "Focus the graph, organize related nodes, and keep the current patch readable."
+            }
+            Self::AutoConnect => {
+                "Capture repeatable routing so the patch reconnects itself when nodes appear."
+            }
+            Self::SavedSetups => {
+                "Save the current setup and restore it later when you need a known-good scene."
+            }
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct GraphVisibilitySummary {
+    total_nodes: usize,
+    visible_nodes: usize,
+    hidden_by_focus: usize,
+    hidden_by_layer: usize,
+    hidden_background: usize,
+    dimmed_background: usize,
+}
+
+impl GraphVisibilitySummary {
+    fn has_hidden_state(self) -> bool {
+        self.hidden_by_focus > 0
+            || self.hidden_by_layer > 0
+            || self.hidden_background > 0
+            || self.dimmed_background > 0
+    }
 }
 
 /// Main application struct.
@@ -160,6 +216,8 @@ pub(crate) struct AppComponents {
     pub left_sidebar: SidebarState,
     /// Right sidebar state
     pub right_sidebar: SidebarState,
+    /// Current left-side workspace grouping
+    pub active_workspace: WorkspaceSection,
 }
 
 impl AppComponents {
@@ -196,6 +254,7 @@ impl AppComponents {
             last_viewport_size: (1000.0, 800.0),
             left_sidebar: SidebarState::default(),
             right_sidebar: SidebarState::default(),
+            active_workspace: WorkspaceSection::Patch,
         }
     }
 }
@@ -224,15 +283,18 @@ impl eframe::App for PipeflowApp {
         // Show command palette (with node search entries)
         let node_entries: Vec<(crate::util::id::NodeId, String)> = {
             let state = self.state.read();
-            state.graph.nodes.values()
+            state
+                .graph
+                .nodes
+                .values()
                 .map(|n| (n.id, state.ui.resolved_display_name(n).to_string()))
                 .collect()
         };
-        if let Some(action) = self
-            .components
-            .command_palette
-            .show(ctx, &self.components.command_registry, &node_entries)
-        {
+        if let Some(action) = self.components.command_palette.show(
+            ctx,
+            &self.components.command_registry,
+            &node_entries,
+        ) {
             self.handle_command_action(action);
         }
 
@@ -364,11 +426,8 @@ impl PipeflowApp {
                             if let Err(e) = self.config.save() {
                                 let msg = format!("Failed to save config: {}", e);
                                 tracing::error!("{}", msg);
-                                self.components.status_message = Some((
-                                    msg,
-                                    std::time::Instant::now(),
-                                    true,
-                                ));
+                                self.components.status_message =
+                                    Some((msg, std::time::Instant::now(), true));
                             } else {
                                 tracing::info!("Configuration saved");
                                 self.components.status_message = Some((
@@ -406,7 +465,8 @@ impl PipeflowApp {
                     ui.label("Enter a custom display name:");
                     ui.add_space(4.0);
 
-                    let response = ui.text_edit_singleline(&mut self.components.rename_dialog.input);
+                    let response =
+                        ui.text_edit_singleline(&mut self.components.rename_dialog.input);
 
                     // Focus the text input on first frame
                     if response.gained_focus() || !response.has_focus() {
@@ -478,25 +538,46 @@ impl PipeflowApp {
 
     /// Renders the top toolbar.
     fn render_toolbar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
+        let safety_fill = {
             let state = self.state.read();
-            let can_undo = self.components.undo_stack.can_undo();
-            let can_redo = self.components.undo_stack.can_redo();
-            let response = Toolbar::show(
-                ui,
-                &state.safety,
-                state.connection,
-                &self.config.meters,
-                state.ui.hide_uninteresting,
-                &state.ui.layer_visibility,
-                can_undo,
-                can_redo,
-                &self.components.theme,
-            );
-            drop(state);
+            match state.safety.mode {
+                crate::domain::safety::SafetyMode::Normal => {
+                    egui::Color32::from_rgba_unmultiplied(80, 160, 120, 16)
+                }
+                crate::domain::safety::SafetyMode::ReadOnly => {
+                    egui::Color32::from_rgba_unmultiplied(220, 180, 90, 18)
+                }
+                crate::domain::safety::SafetyMode::Stage => {
+                    egui::Color32::from_rgba_unmultiplied(255, 140, 80, 20)
+                }
+            }
+        };
 
-            self.handle_toolbar_response(response);
-        });
+        egui::TopBottomPanel::top("toolbar")
+            .frame(
+                egui::Frame::NONE
+                    .fill(safety_fill)
+                    .inner_margin(egui::Margin::same(6)),
+            )
+            .show(ctx, |ui| {
+                let state = self.state.read();
+                let can_undo = self.components.undo_stack.can_undo();
+                let can_redo = self.components.undo_stack.can_redo();
+                let response = Toolbar::show(
+                    ui,
+                    &state.safety,
+                    state.connection,
+                    &self.config.meters,
+                    state.ui.hide_uninteresting,
+                    &state.ui.layer_visibility,
+                    can_undo,
+                    can_redo,
+                    &self.components.theme,
+                );
+                drop(state);
+
+                self.handle_toolbar_response(response);
+            });
     }
 
     /// Handles toolbar button responses.
@@ -520,9 +601,17 @@ impl PipeflowApp {
             self.meter_collector.set_refresh_rate(rate);
         }
 
-        if response.toggle_hide_uninteresting {
+        if response.toggle_hide_background {
             let mut state = self.state.write();
             state.ui.toggle_hide_uninteresting();
+        }
+
+        if response.show_settings {
+            self.components.show_settings = true;
+        }
+
+        if response.show_help {
+            self.components.show_help = true;
         }
 
         if let Some(layer) = response.toggle_layer {
@@ -532,6 +621,10 @@ impl PipeflowApp {
 
         if response.auto_layout {
             self.perform_auto_layout(false);
+        }
+
+        if response.fit_view {
+            self.components.graph_view.reset_view();
         }
 
         if response.undo {
@@ -552,7 +645,11 @@ impl PipeflowApp {
                 .show(ctx, |ui| {
                     ui.add_space(8.0);
                     ui.vertical_centered(|ui| {
-                        if ui.button(egui_phosphor::regular::CARET_LEFT).on_hover_text("Show Inspector (I)").clicked() {
+                        if ui
+                            .button(egui_phosphor::regular::CARET_LEFT)
+                            .on_hover_text("Show Inspector (I)")
+                            .clicked()
+                        {
                             self.components.show_inspector = true;
                             self.components.right_sidebar.expand();
                         }
@@ -576,7 +673,10 @@ impl PipeflowApp {
         let panel = if use_exact {
             panel.exact_width(width).resizable(false)
         } else {
-            panel.min_width(MIN_WIDTH).max_width(MAX_WIDTH).resizable(true)
+            panel
+                .min_width(MIN_WIDTH)
+                .max_width(MAX_WIDTH)
+                .resizable(true)
         };
 
         let response = panel.show(ctx, |ui| {
@@ -585,12 +685,20 @@ impl PipeflowApp {
             ui.horizontal(|ui| {
                 if show_collapsed {
                     ui.vertical_centered(|ui| {
-                        if ui.button(egui_phosphor::regular::CARET_LEFT).on_hover_text("Expand (])").clicked() {
+                        if ui
+                            .button(egui_phosphor::regular::CARET_LEFT)
+                            .on_hover_text("Expand (])")
+                            .clicked()
+                        {
                             toggle = true;
                         }
                     });
                 } else {
-                    if ui.button(egui_phosphor::regular::CARET_RIGHT).on_hover_text("Collapse (])").clicked() {
+                    if ui
+                        .button(egui_phosphor::regular::CARET_RIGHT)
+                        .on_hover_text("Collapse (])")
+                        .clicked()
+                    {
                         toggle = true;
                     }
                     ui.heading("Inspector");
@@ -627,7 +735,9 @@ impl PipeflowApp {
         });
 
         // Sync our state from the actual panel width
-        self.components.right_sidebar.sync_from_panel(response.response.rect.width());
+        self.components
+            .right_sidebar
+            .sync_from_panel(response.response.rect.width());
     }
 
     /// Renders link inspector details.
@@ -651,16 +761,26 @@ impl PipeflowApp {
                 }
                 self.handle_app_command(AppCommand::ToggleLink { link_id, active });
                 self.components.undo_stack.push(UndoEntry {
-                    description: if active { "Enable link" } else { "Disable link" }.to_string(),
+                    description: if active {
+                        "Enable link"
+                    } else {
+                        "Disable link"
+                    }
+                    .to_string(),
                     forward: UndoAction::AppCommand(AppCommand::ToggleLink { link_id, active }),
-                    reverse: UndoAction::AppCommand(AppCommand::ToggleLink { link_id, active: !active }),
+                    reverse: UndoAction::AppCommand(AppCommand::ToggleLink {
+                        link_id,
+                        active: !active,
+                    }),
                 });
             }
 
             if let Some(link_id) = response.remove_link {
                 let port_ids = {
                     let state = self.state.read();
-                    state.graph.get_link(&link_id)
+                    state
+                        .graph
+                        .get_link(&link_id)
                         .map(|l| (l.output_port, l.input_port))
                 };
                 {
@@ -684,7 +804,11 @@ impl PipeflowApp {
     }
 
     /// Renders node inspector details.
-    fn render_node_inspector(&mut self, ui: &mut egui::Ui, selected_nodes: &[crate::util::id::NodeId]) {
+    fn render_node_inspector(
+        &mut self,
+        ui: &mut egui::Ui,
+        selected_nodes: &[crate::util::id::NodeId],
+    ) {
         let state = self.state.read();
         let response = NodePanel::show_multi(
             ui,
@@ -714,7 +838,9 @@ impl PipeflowApp {
         if let Some(link_id) = response.remove_link {
             let port_ids = {
                 let state = self.state.read();
-                state.graph.get_link(&link_id)
+                state
+                    .graph
+                    .get_link(&link_id)
                     .map(|l| (l.output_port, l.input_port))
             };
             {
@@ -744,9 +870,17 @@ impl PipeflowApp {
             }
             self.handle_app_command(AppCommand::ToggleLink { link_id, active });
             self.components.undo_stack.push(UndoEntry {
-                description: if active { "Enable link" } else { "Disable link" }.to_string(),
+                description: if active {
+                    "Enable link"
+                } else {
+                    "Disable link"
+                }
+                .to_string(),
                 forward: UndoAction::AppCommand(AppCommand::ToggleLink { link_id, active }),
-                reverse: UndoAction::AppCommand(AppCommand::ToggleLink { link_id, active: !active }),
+                reverse: UndoAction::AppCommand(AppCommand::ToggleLink {
+                    link_id,
+                    active: !active,
+                }),
             });
         }
 
@@ -844,7 +978,6 @@ impl PipeflowApp {
 
     /// Renders the left panel (filters, groups, rules).
     fn render_left_panel(&mut self, ctx: &egui::Context) {
-        // Animate sidebar
         let dt = ctx.input(|i| i.stable_dt);
         if self.components.left_sidebar.animate(dt) {
             ctx.request_repaint();
@@ -854,27 +987,27 @@ impl PipeflowApp {
         let show_collapsed = self.components.left_sidebar.show_collapsed_content();
         let use_exact = self.components.left_sidebar.use_exact_width();
 
-        // Configure panel - use exact_width during animation, otherwise let egui handle resize
         let panel = egui::SidePanel::left("left_panel");
         let panel = if use_exact {
             panel.exact_width(width).resizable(false)
         } else {
-            panel.min_width(MIN_WIDTH).max_width(MAX_WIDTH).resizable(true)
+            panel
+                .min_width(MIN_WIDTH)
+                .max_width(MAX_WIDTH)
+                .resizable(true)
         };
 
         let response = panel.show(ctx, |ui| {
-            // Header with toggle button
             let mut toggle = false;
             ui.horizontal(|ui| {
                 if show_collapsed {
-                    ui.vertical_centered(|ui| {
-                        if ui.button(egui_phosphor::regular::CARET_RIGHT).on_hover_text("Expand ([)").clicked() {
-                            toggle = true;
-                        }
-                    });
+                    if ui.button(egui_phosphor::regular::CARET_RIGHT).on_hover_text("Expand navigation ([)").clicked() {
+                        toggle = true;
+                    }
                 } else {
+                    ui.heading("Navigate");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui_phosphor::regular::CARET_LEFT).on_hover_text("Collapse ([)").clicked() {
+                        if ui.button(egui_phosphor::regular::CARET_LEFT).on_hover_text("Collapse navigation ([)").clicked() {
                             toggle = true;
                         }
                     });
@@ -887,73 +1020,91 @@ impl PipeflowApp {
                 self.components.left_sidebar.toggle();
             }
 
-            // Content
             if show_collapsed {
                 ui.vertical_centered(|ui| {
-                    ui.add_space(8.0);
-                    ui.label(egui_phosphor::regular::MAGNIFYING_GLASS).on_hover_text("Filters");
-                    ui.add_space(12.0);
-                    ui.label(egui_phosphor::regular::FOLDER).on_hover_text("Groups");
-                    ui.add_space(12.0);
-                    ui.label(egui_phosphor::regular::LINK).on_hover_text("Rules");
-                    ui.add_space(12.0);
-                    ui.label(egui_phosphor::regular::CAMERA).on_hover_text("Snapshots");
+                    for section in [WorkspaceSection::Patch, WorkspaceSection::AutoConnect, WorkspaceSection::SavedSetups] {
+                        let selected = self.components.active_workspace == section;
+                        let button = egui::Button::new(section.icon()).selected(selected);
+                        if ui.add(button).on_hover_text(section.label()).clicked() {
+                            self.components.active_workspace = section;
+                        }
+                        ui.add_space(8.0);
+                    }
                 });
             } else {
+                ui.horizontal_wrapped(|ui| {
+                    for section in [WorkspaceSection::Patch, WorkspaceSection::AutoConnect, WorkspaceSection::SavedSetups] {
+                        let selected = self.components.active_workspace == section;
+                        if ui.selectable_label(selected, format!("{} {}", section.icon(), section.label())).clicked() {
+                            self.components.active_workspace = section;
+                        }
+                    }
+                });
+                ui.add_space(6.0);
+                ui.label(self.components.active_workspace.summary());
+                ui.separator();
+
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     ui.set_min_width(0.0);
 
-                    egui::CollapsingHeader::new("Filters")
-                        .default_open(false)
-                        .show(ui, |ui| {
-                            let mut state = self.state.write();
-                            FilterPanel::show(ui, &mut state.ui.filters, &self.components.theme);
-                        });
+                    match self.components.active_workspace {
+                        WorkspaceSection::Patch => {
+                            egui::CollapsingHeader::new("Focus")
+                                .default_open(true)
+                                .show(ui, |ui| {
+                                    let mut state = self.state.write();
+                                    FilterPanel::show(ui, &mut state.ui.filters, &self.components.theme);
+                                });
 
-                    ui.add_space(4.0);
+                            ui.add_space(4.0);
 
-                    egui::CollapsingHeader::new("Groups")
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            let group_response = self.show_groups_panel(ui);
-                            self.handle_group_panel_response(group_response);
-                        });
-
-                    ui.add_space(4.0);
-
-                    egui::CollapsingHeader::new("Connection Rules")
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            let rules_response = {
-                                let mut guard = self.state.write();
-                                let state = &mut *guard;
-                                self.components.rules_panel.show(
-                                    ui,
-                                    &mut state.ui.rules,
-                                    &state.graph,
-                                    &self.components.theme,
-                                )
-                            };
-                            self.handle_rules_panel_response(rules_response);
-                        });
-
-                    ui.add_space(4.0);
-
-                    egui::CollapsingHeader::new("Snapshots")
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            let snap_response = self.components.snapshot_panel.show(
-                                ui,
-                                &self.components.snapshot_manager,
-                            );
-                            self.handle_snapshot_panel_response(snap_response);
-                        });
+                            egui::CollapsingHeader::new("Groups")
+                                .default_open(true)
+                                .show(ui, |ui| {
+                                    let group_response = self.show_groups_panel(ui);
+                                    self.handle_group_panel_response(group_response);
+                                });
+                        }
+                        WorkspaceSection::AutoConnect => {
+                            egui::CollapsingHeader::new("Auto Connect")
+                                .default_open(true)
+                                .show(ui, |ui| {
+                                    ui.label("Reuse routing patterns instead of wiring the same patch by hand every time.");
+                                    ui.add_space(6.0);
+                                    let rules_response = {
+                                        let mut guard = self.state.write();
+                                        let state = &mut *guard;
+                                        self.components.rules_panel.show(
+                                            ui,
+                                            &mut state.ui.rules,
+                                            &state.graph,
+                                            &self.components.theme,
+                                        )
+                                    };
+                                    self.handle_rules_panel_response(rules_response);
+                                });
+                        }
+                        WorkspaceSection::SavedSetups => {
+                            egui::CollapsingHeader::new("Saved Setups")
+                                .default_open(true)
+                                .show(ui, |ui| {
+                                    ui.label("Capture the current patch, then restore it later when you want to get back to a known-good setup.");
+                                    ui.add_space(6.0);
+                                    let snap_response = self.components.snapshot_panel.show(
+                                        ui,
+                                        &self.components.snapshot_manager,
+                                    );
+                                    self.handle_snapshot_panel_response(snap_response);
+                                });
+                        }
+                    }
                 });
             }
         });
 
-        // Sync our state from the actual panel width
-        self.components.left_sidebar.sync_from_panel(response.response.rect.width());
+        self.components
+            .left_sidebar
+            .sync_from_panel(response.response.rect.width());
     }
 
     /// Handles group panel responses.
@@ -962,15 +1113,20 @@ impl PipeflowApp {
         if let Some(group_id) = response.created_group {
             let mut state = self.state.write();
             // First, collect member node_ids from the group
-            let member_ids: Vec<_> = state.ui.groups.get_group(&group_id)
+            let member_ids: Vec<_> = state
+                .ui
+                .groups
+                .get_group(&group_id)
                 .map(|g| g.members.iter().copied().collect())
                 .unwrap_or_default();
             // Then, build identifiers from the graph
-            let identifiers: Vec<_> = member_ids.iter()
+            let identifiers: Vec<_> = member_ids
+                .iter()
                 .filter_map(|node_id| {
-                    state.graph.get_node(node_id).map(|node| {
-                        command_handling::create_stable_identifier(node, &state.graph)
-                    })
+                    state
+                        .graph
+                        .get_node(node_id)
+                        .map(|node| command_handling::create_stable_identifier(node, &state.graph))
                 })
                 .collect();
             // Finally, insert into the group's persistent_members
@@ -1036,8 +1192,7 @@ impl PipeflowApp {
                 Err(e) => {
                     let msg = format!("Failed to save snapshot: {}", e);
                     tracing::error!("{}", msg);
-                    self.components.status_message =
-                        Some((msg, std::time::Instant::now(), true));
+                    self.components.status_message = Some((msg, std::time::Instant::now(), true));
                 }
             }
         }
@@ -1047,8 +1202,7 @@ impl PipeflowApp {
             if let Err(e) = self.components.snapshot_manager.delete(id) {
                 let msg = format!("Failed to delete snapshot: {}", e);
                 tracing::error!("{}", msg);
-                self.components.status_message =
-                    Some((msg, std::time::Instant::now(), true));
+                self.components.status_message = Some((msg, std::time::Instant::now(), true));
             }
         }
 
@@ -1070,16 +1224,20 @@ impl PipeflowApp {
         let state = self.state.read();
 
         // Build a lookup: NodeIdentifier -> Vec<NodeId> for current graph
-        let mut identifier_to_nodes: std::collections::HashMap<NodeIdentifier, Vec<crate::util::id::NodeId>> =
-            std::collections::HashMap::new();
+        let mut identifier_to_nodes: std::collections::HashMap<
+            NodeIdentifier,
+            Vec<crate::util::id::NodeId>,
+        > = std::collections::HashMap::new();
         for node in state.graph.nodes.values() {
             let ident = command_handling::create_stable_identifier(node, &state.graph);
             identifier_to_nodes.entry(ident).or_default().push(node.id);
         }
 
         // Resolve snapshot connections to port IDs
-        let mut desired_links: std::collections::HashSet<(crate::util::id::PortId, crate::util::id::PortId)> =
-            std::collections::HashSet::new();
+        let mut desired_links: std::collections::HashSet<(
+            crate::util::id::PortId,
+            crate::util::id::PortId,
+        )> = std::collections::HashSet::new();
         let mut unresolved = 0usize;
 
         for conn in &snapshot.connections {
@@ -1131,16 +1289,21 @@ impl PipeflowApp {
         // Diff: find links to create (in snapshot but not in current graph)
         let mut links_to_create = Vec::new();
         for &(out_port, in_port) in &desired_links {
-            let exists = state.graph.links.values().any(|l| {
-                l.output_port == out_port && l.input_port == in_port
-            });
+            let exists = state
+                .graph
+                .links
+                .values()
+                .any(|l| l.output_port == out_port && l.input_port == in_port);
             if !exists {
                 links_to_create.push((out_port, in_port));
             }
         }
 
         // Resolve volume changes
-        let mut volume_changes: Vec<(crate::util::id::NodeId, crate::domain::audio::VolumeControl)> = Vec::new();
+        let mut volume_changes: Vec<(
+            crate::util::id::NodeId,
+            crate::domain::audio::VolumeControl,
+        )> = Vec::new();
         for sv in &snapshot.volumes {
             if let Some(node_ids) = identifier_to_nodes.get(&sv.identifier) {
                 for &nid in node_ids {
@@ -1210,7 +1373,10 @@ impl PipeflowApp {
 
             for spec in &rule.connections {
                 // Find all output ports matching the output pattern
-                let output_ports: Vec<_> = state.graph.ports.values()
+                let output_ports: Vec<_> = state
+                    .graph
+                    .ports
+                    .values()
                     .filter(|p| p.direction == PortDirection::Output)
                     .filter(|p| {
                         let node = state.graph.get_node(&p.node_id);
@@ -1220,13 +1386,17 @@ impl PipeflowApp {
                                 &n.name,
                                 &p.name,
                             )
-                        }).unwrap_or(false)
+                        })
+                        .unwrap_or(false)
                     })
                     .map(|p| p.id)
                     .collect();
 
                 // Find all input ports matching the input pattern
-                let input_ports: Vec<_> = state.graph.ports.values()
+                let input_ports: Vec<_> = state
+                    .graph
+                    .ports
+                    .values()
                     .filter(|p| p.direction == PortDirection::Input)
                     .filter(|p| {
                         let node = state.graph.get_node(&p.node_id);
@@ -1236,7 +1406,8 @@ impl PipeflowApp {
                                 &n.name,
                                 &p.name,
                             )
-                        }).unwrap_or(false)
+                        })
+                        .unwrap_or(false)
                     })
                     .map(|p| p.id)
                     .collect();
@@ -1271,6 +1442,12 @@ impl PipeflowApp {
     /// Renders the central graph view.
     fn render_graph_view(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            let summary = self.graph_visibility_summary();
+            if summary.has_hidden_state() {
+                self.render_graph_visibility_summary(ui, summary);
+                ui.add_space(8.0);
+            }
+
             let available = ui.available_rect_before_wrap();
             self.components.last_viewport_size = (available.width(), available.height());
 
@@ -1295,6 +1472,100 @@ impl PipeflowApp {
 
             self.handle_graph_view_response(ctx, response);
         });
+    }
+
+    fn graph_visibility_summary(&self) -> GraphVisibilitySummary {
+        let state = self.state.read();
+        let mut summary = GraphVisibilitySummary {
+            total_nodes: state.graph.nodes.len(),
+            ..GraphVisibilitySummary::default()
+        };
+
+        for node in state.graph.nodes.values() {
+            let is_background = state.ui.uninteresting_nodes.contains(&node.id);
+            if state.ui.hide_uninteresting && is_background {
+                summary.hidden_background += 1;
+                continue;
+            }
+            if !state.ui.layer_visibility.is_visible(node.layer) {
+                summary.hidden_by_layer += 1;
+                continue;
+            }
+            if !state.ui.filters.is_empty()
+                && !state
+                    .ui
+                    .filters
+                    .matches_with_ports(node, &state.graph.ports)
+            {
+                summary.hidden_by_focus += 1;
+                continue;
+            }
+            summary.visible_nodes += 1;
+            if is_background {
+                summary.dimmed_background += 1;
+            }
+        }
+
+        summary
+    }
+
+    fn render_graph_visibility_summary(
+        &mut self,
+        ui: &mut egui::Ui,
+        summary: GraphVisibilitySummary,
+    ) {
+        egui::Frame::NONE
+            .fill(egui::Color32::from_rgba_unmultiplied(110, 140, 180, 20))
+            .stroke(egui::Stroke::new(
+                1.0,
+                egui::Color32::from_rgba_unmultiplied(120, 160, 220, 60),
+            ))
+            .corner_radius(8)
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.strong(format!(
+                        "Showing {} of {} nodes",
+                        summary.visible_nodes, summary.total_nodes
+                    ));
+
+                    if summary.hidden_by_focus > 0 {
+                        ui.label(format!("• {} hidden by focus", summary.hidden_by_focus));
+                    }
+                    if summary.hidden_by_layer > 0 {
+                        ui.label(format!("• {} hidden by layer", summary.hidden_by_layer));
+                    }
+                    if summary.hidden_background > 0 {
+                        ui.label(format!(
+                            "• {} background nodes hidden",
+                            summary.hidden_background
+                        ));
+                    }
+                    if summary.dimmed_background > 0 {
+                        ui.label(format!(
+                            "• {} background nodes still visible",
+                            summary.dimmed_background
+                        ));
+                    }
+
+                    if ui.button("Show everything").clicked() {
+                        let mut state = self.state.write();
+                        state.ui.filters.clear();
+                        state.ui.hide_uninteresting = false;
+                        state.ui.layer_visibility = Default::default();
+                    }
+
+                    if summary.hidden_by_focus > 0 && ui.button("Clear focus").clicked() {
+                        let mut state = self.state.write();
+                        state.ui.filters.clear();
+                    }
+
+                    if summary.hidden_background > 0 && ui.button("Show background").clicked() {
+                        let mut state = self.state.write();
+                        state.ui.hide_uninteresting = false;
+                    }
+                });
+            });
     }
 
     /// Handles graph view responses.
@@ -1372,7 +1643,9 @@ impl PipeflowApp {
             // Capture port IDs before removal for undo
             let port_ids = {
                 let state = self.state.read();
-                state.graph.get_link(&link_id)
+                state
+                    .graph
+                    .get_link(&link_id)
                     .map(|l| (l.output_port, l.input_port))
             };
             {
@@ -1402,9 +1675,17 @@ impl PipeflowApp {
             }
             self.handle_app_command(AppCommand::ToggleLink { link_id, active });
             self.components.undo_stack.push(UndoEntry {
-                description: if active { "Enable link" } else { "Disable link" }.to_string(),
+                description: if active {
+                    "Enable link"
+                } else {
+                    "Disable link"
+                }
+                .to_string(),
                 forward: UndoAction::AppCommand(AppCommand::ToggleLink { link_id, active }),
-                reverse: UndoAction::AppCommand(AppCommand::ToggleLink { link_id, active: !active }),
+                reverse: UndoAction::AppCommand(AppCommand::ToggleLink {
+                    link_id,
+                    active: !active,
+                }),
             });
         }
 
@@ -1412,7 +1693,9 @@ impl PipeflowApp {
         if let Some(node_ids) = response.toggle_uninteresting {
             let state = self.state.read();
             let nodes_to_toggle = {
-                let any_selected = node_ids.iter().any(|id| state.ui.selected_nodes.contains(id));
+                let any_selected = node_ids
+                    .iter()
+                    .any(|id| state.ui.selected_nodes.contains(id));
                 if any_selected && !state.ui.selected_nodes.is_empty() {
                     state.ui.selected_nodes.iter().cloned().collect()
                 } else {
@@ -1510,7 +1793,8 @@ impl PipeflowApp {
                 .iter()
                 .filter_map(|(node_id, pos)| {
                     state.graph.get_node(node_id).map(|node| {
-                        let identifier = command_handling::create_stable_identifier(node, &state.graph);
+                        let identifier =
+                            command_handling::create_stable_identifier(node, &state.graph);
                         (identifier, *pos)
                     })
                 })
@@ -1521,9 +1805,10 @@ impl PipeflowApp {
                 .uninteresting_nodes
                 .iter()
                 .filter_map(|node_id| {
-                    state.graph.get_node(node_id).map(|node| {
-                        command_handling::create_stable_identifier(node, &state.graph)
-                    })
+                    state
+                        .graph
+                        .get_node(node_id)
+                        .map(|node| command_handling::create_stable_identifier(node, &state.graph))
                 })
                 .collect();
 

@@ -131,7 +131,6 @@ impl MeterData {
             value
         }
     }
-
 }
 
 /// Meter data for link flow visualization.
@@ -168,7 +167,7 @@ impl LinkMeterData {
 
         // Smooth the activity with attack/decay envelope
         let attack_rate = 8.0; // Fast attack
-        let decay_rate = 2.0;  // Slower decay
+        let decay_rate = 2.0; // Slower decay
         let rate = if source_activity > self.smoothed_activity {
             attack_rate
         } else {
@@ -269,10 +268,16 @@ mod tests {
 
         // Fresh meter should return unchanged peak
         let decayed = meter.get_decayed_peak(0, threshold);
-        assert!((decayed - 0.8).abs() < 0.001, "Fresh meter should return unchanged value");
+        assert!(
+            (decayed - 0.8).abs() < 0.001,
+            "Fresh meter should return unchanged value"
+        );
 
         let decayed_max = meter.get_decayed_max_peak(threshold);
-        assert!((decayed_max - 0.8).abs() < 0.001, "Fresh meter max should return unchanged value");
+        assert!(
+            (decayed_max - 0.8).abs() < 0.001,
+            "Fresh meter max should return unchanged value"
+        );
     }
 
     #[test]
@@ -288,12 +293,18 @@ mod tests {
         // Should be significantly decayed after 100ms past threshold
         let decayed = meter.get_decayed_peak(0, threshold);
         assert!(decayed < 0.8, "Stale meter should have decayed peak");
-        assert!(decayed < 0.7, "Should be significantly decayed after 100ms stale");
+        assert!(
+            decayed < 0.7,
+            "Should be significantly decayed after 100ms stale"
+        );
 
         // After enough time, should be nearly zero
         std::thread::sleep(std::time::Duration::from_millis(400));
         let very_decayed = meter.get_decayed_peak(0, threshold);
-        assert!(very_decayed < 0.2, "Should be nearly zero after ~500ms stale");
+        assert!(
+            very_decayed < 0.2,
+            "Should be nearly zero after ~500ms stale"
+        );
     }
 
     #[test]
@@ -328,7 +339,10 @@ mod tests {
         for _ in 0..30 {
             link_meter.update(0.8, dt);
         }
-        assert!(link_meter.smoothed_activity > 0.7, "Should approach target after 30 frames");
+        assert!(
+            link_meter.smoothed_activity > 0.7,
+            "Should approach target after 30 frames"
+        );
     }
 
     #[test]
@@ -353,7 +367,10 @@ mod tests {
         for _ in 0..120 {
             link_meter.update(0.0, dt);
         }
-        assert!(link_meter.smoothed_activity < 0.1, "Should approach zero after 2 seconds");
+        assert!(
+            link_meter.smoothed_activity < 0.1,
+            "Should approach zero after 2 seconds"
+        );
     }
 
     #[test]
@@ -384,7 +401,10 @@ mod tests {
 
         link_meter.update(0.0, dt);
 
-        assert_eq!(link_meter.pulse_phase, 0.0, "Pulse should reset when inactive");
+        assert_eq!(
+            link_meter.pulse_phase, 0.0,
+            "Pulse should reset when inactive"
+        );
     }
 
     #[test]
@@ -451,7 +471,10 @@ mod tests {
             link_meter.update(0.0, dt);
         }
 
-        assert!(link_meter.smoothed_activity >= 0.0, "Should never be negative");
+        assert!(
+            link_meter.smoothed_activity >= 0.0,
+            "Should never be negative"
+        );
     }
 
     #[test]
@@ -531,7 +554,10 @@ mod tests {
             link_meter.update(0.6, dt);
         }
         let during_music = link_meter.glow_intensity();
-        assert!(during_music > 0.4, "Should show significant activity during music");
+        assert!(
+            during_music > 0.4,
+            "Should show significant activity during music"
+        );
 
         // Music stops - activity decays over ~1 second
         for _ in 0..60 {
@@ -539,13 +565,19 @@ mod tests {
         }
         let after_stop = link_meter.glow_intensity();
         assert!(after_stop < during_music, "Should decay after music stops");
-        assert!(after_stop < 0.2, "Should be mostly faded after 1 second of silence");
+        assert!(
+            after_stop < 0.2,
+            "Should be mostly faded after 1 second of silence"
+        );
 
         // After 2 seconds of silence, should be essentially zero
         for _ in 0..60 {
             link_meter.update(0.0, dt);
         }
-        assert!(link_meter.glow_intensity() < 0.05, "Should be nearly zero after 2 seconds");
+        assert!(
+            link_meter.glow_intensity() < 0.05,
+            "Should be nearly zero after 2 seconds"
+        );
     }
 }
 

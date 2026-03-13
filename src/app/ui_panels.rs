@@ -39,33 +39,35 @@ impl PipeflowApp {
         egui::CollapsingHeader::new("Source")
             .default_open(true)
             .show(ui, |ui| {
-                egui::Grid::new("link_source").num_columns(2).show(ui, |ui| {
-                    ui.label("Node:");
-                    ui.add(
-                        egui::Label::new(
-                            output_node.map(|n| n.display_name()).unwrap_or("Unknown"),
-                        )
-                        .wrap(),
-                    );
-                    ui.end_row();
+                egui::Grid::new("link_source")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label("Node:");
+                        ui.add(
+                            egui::Label::new(
+                                output_node.map(|n| n.display_name()).unwrap_or("Unknown"),
+                            )
+                            .wrap(),
+                        );
+                        ui.end_row();
 
-                    ui.label("Port:");
-                    ui.add(
-                        egui::Label::new(
-                            output_port.map(|p| p.display_name()).unwrap_or("Unknown"),
-                        )
-                        .wrap(),
-                    );
-                    ui.end_row();
+                        ui.label("Port:");
+                        ui.add(
+                            egui::Label::new(
+                                output_port.map(|p| p.display_name()).unwrap_or("Unknown"),
+                            )
+                            .wrap(),
+                        );
+                        ui.end_row();
 
-                    if let Some(node) = output_node {
-                        if let Some(ref media_class) = node.media_class {
-                            ui.label("Type:");
-                            ui.label(media_class.display_name());
-                            ui.end_row();
+                        if let Some(node) = output_node {
+                            if let Some(ref media_class) = node.media_class {
+                                ui.label("Type:");
+                                ui.label(media_class.display_name());
+                                ui.end_row();
+                            }
                         }
-                    }
-                });
+                    });
             })
             .header_response
             .on_hover_text("Output side of the connection");
@@ -77,19 +79,15 @@ impl PipeflowApp {
                 egui::Grid::new("link_dest").num_columns(2).show(ui, |ui| {
                     ui.label("Node:");
                     ui.add(
-                        egui::Label::new(
-                            input_node.map(|n| n.display_name()).unwrap_or("Unknown"),
-                        )
-                        .wrap(),
+                        egui::Label::new(input_node.map(|n| n.display_name()).unwrap_or("Unknown"))
+                            .wrap(),
                     );
                     ui.end_row();
 
                     ui.label("Port:");
                     ui.add(
-                        egui::Label::new(
-                            input_port.map(|p| p.display_name()).unwrap_or("Unknown"),
-                        )
-                        .wrap(),
+                        egui::Label::new(input_port.map(|p| p.display_name()).unwrap_or("Unknown"))
+                            .wrap(),
                     );
                     ui.end_row();
 
@@ -157,13 +155,7 @@ impl PipeflowApp {
         let mut state = self.state.write();
         let selected = state.ui.selected_nodes.clone();
         let display_names = GroupPanel::build_display_name_map(state.graph.nodes.values());
-        let response = group_panel.show(
-            ui,
-            &mut state.ui.groups,
-            &selected,
-            &display_names,
-            theme,
-        );
+        let response = group_panel.show(ui, &mut state.ui.groups, &selected, &display_names, theme);
 
         // Handle toggle collapsed
         if let Some(group_id) = response.toggle_collapsed {
@@ -175,9 +167,10 @@ impl PipeflowApp {
         // Handle remove from group
         if let Some((node_id, group_id)) = response.remove_from_group {
             // Get the identifier before removing (to also remove from persistent_members)
-            let identifier = state.graph.get_node(&node_id).map(|node| {
-                super::command_handling::create_stable_identifier(node, &state.graph)
-            });
+            let identifier = state
+                .graph
+                .get_node(&node_id)
+                .map(|node| super::command_handling::create_stable_identifier(node, &state.graph));
             if let Some(group) = state.ui.groups.get_group_mut(&group_id) {
                 group.remove_member(&node_id);
                 // Also remove from persistent_members so it stays removed after restart

@@ -245,35 +245,40 @@ impl RemoteConnection {
                     _ => return None,
                 })
             }
-            proto::event::Event::NodeAdded(added) => {
-                added.node.as_ref().and_then(Self::proto_node_to_info).map(PwEvent::NodeAdded)
-            }
+            proto::event::Event::NodeAdded(added) => added
+                .node
+                .as_ref()
+                .and_then(Self::proto_node_to_info)
+                .map(PwEvent::NodeAdded),
             proto::event::Event::NodeRemoved(removed) => {
                 Some(PwEvent::NodeRemoved(NodeId::new(removed.node_id)))
             }
-            proto::event::Event::PortAdded(added) => {
-                added.port.as_ref().and_then(Self::proto_port_to_info).map(PwEvent::PortAdded)
-            }
+            proto::event::Event::PortAdded(added) => added
+                .port
+                .as_ref()
+                .and_then(Self::proto_port_to_info)
+                .map(PwEvent::PortAdded),
             proto::event::Event::PortRemoved(removed) => {
                 Some(PwEvent::PortRemoved(PortId::new(removed.port_id)))
             }
-            proto::event::Event::LinkAdded(added) => {
-                added.link.as_ref().and_then(Self::proto_link_to_info).map(PwEvent::LinkAdded)
-            }
+            proto::event::Event::LinkAdded(added) => added
+                .link
+                .as_ref()
+                .and_then(Self::proto_link_to_info)
+                .map(PwEvent::LinkAdded),
             proto::event::Event::LinkRemoved(removed) => {
                 Some(PwEvent::LinkRemoved(LinkId::new(removed.link_id)))
             }
-            proto::event::Event::VolumeChanged(changed) => {
-                changed.volume.as_ref().map(|v| {
-                    PwEvent::VolumeChanged(
-                        NodeId::new(changed.node_id),
-                        Self::proto_volume_to_control(v),
-                    )
-                })
-            }
-            proto::event::Event::MuteChanged(changed) => {
-                Some(PwEvent::MuteChanged(NodeId::new(changed.node_id), changed.muted))
-            }
+            proto::event::Event::VolumeChanged(changed) => changed.volume.as_ref().map(|v| {
+                PwEvent::VolumeChanged(
+                    NodeId::new(changed.node_id),
+                    Self::proto_volume_to_control(v),
+                )
+            }),
+            proto::event::Event::MuteChanged(changed) => Some(PwEvent::MuteChanged(
+                NodeId::new(changed.node_id),
+                changed.muted,
+            )),
             proto::event::Event::SafetyStatus(_) => {
                 // Safety status is handled at the app level, not as PwEvent
                 None
@@ -295,7 +300,10 @@ impl RemoteConnection {
             id: NodeId::new(node.id),
             name: node.name.clone(),
             client_id: node.client_id.map(ClientId::new),
-            media_class: node.media_class.as_ref().map(|s| MediaClass::from_pipewire_str(s)),
+            media_class: node
+                .media_class
+                .as_ref()
+                .map(|s| MediaClass::from_pipewire_str(s)),
             application_name: node.application_name.clone(),
             description: node.description.clone(),
             nick: node.nick.clone(),
@@ -386,20 +394,18 @@ impl RemoteConnection {
                     link_id: link_id.raw(),
                 },
             )),
-            AppCommand::ToggleLink { link_id, active } => {
-                Some(proto::command::Command::ToggleLink(
-                    proto::ToggleLinkCommand {
-                        link_id: link_id.raw(),
-                        active: *active,
-                    },
-                ))
-            }
-            AppCommand::SetVolume { node_id, volume } => {
-                Some(proto::command::Command::SetVolume(proto::SetVolumeCommand {
+            AppCommand::ToggleLink { link_id, active } => Some(
+                proto::command::Command::ToggleLink(proto::ToggleLinkCommand {
+                    link_id: link_id.raw(),
+                    active: *active,
+                }),
+            ),
+            AppCommand::SetVolume { node_id, volume } => Some(proto::command::Command::SetVolume(
+                proto::SetVolumeCommand {
                     node_id: node_id.raw(),
                     volume: volume.master,
-                }))
-            }
+                },
+            )),
             AppCommand::SetMute { node_id, muted } => {
                 Some(proto::command::Command::SetMute(proto::SetMuteCommand {
                     node_id: node_id.raw(),
@@ -828,7 +834,11 @@ mod tests {
 
         for cmd in local_commands {
             let proto_cmd = RemoteConnection::app_command_to_proto(&cmd);
-            assert!(proto_cmd.command.is_none(), "Local command should not produce proto: {:?}", cmd);
+            assert!(
+                proto_cmd.command.is_none(),
+                "Local command should not produce proto: {:?}",
+                cmd
+            );
         }
     }
 
@@ -841,12 +851,14 @@ mod tests {
         let proto_event = proto::Event {
             sequence: 1,
             timestamp_ms: 1000,
-            event: Some(proto::event::Event::ConnectionStatus(proto::ConnectionStatus {
-                state: proto::ConnectionState::Connected as i32,
-                reconnect_attempt: 0,
-                max_reconnect_attempts: 0,
-                error_message: String::new(),
-            })),
+            event: Some(proto::event::Event::ConnectionStatus(
+                proto::ConnectionStatus {
+                    state: proto::ConnectionState::Connected as i32,
+                    reconnect_attempt: 0,
+                    max_reconnect_attempts: 0,
+                    error_message: String::new(),
+                },
+            )),
         };
 
         let pw_event = RemoteConnection::proto_event_to_pw(&proto_event).unwrap();
@@ -858,12 +870,14 @@ mod tests {
         let proto_event = proto::Event {
             sequence: 2,
             timestamp_ms: 2000,
-            event: Some(proto::event::Event::ConnectionStatus(proto::ConnectionStatus {
-                state: proto::ConnectionState::Disconnected as i32,
-                reconnect_attempt: 0,
-                max_reconnect_attempts: 0,
-                error_message: String::new(),
-            })),
+            event: Some(proto::event::Event::ConnectionStatus(
+                proto::ConnectionStatus {
+                    state: proto::ConnectionState::Disconnected as i32,
+                    reconnect_attempt: 0,
+                    max_reconnect_attempts: 0,
+                    error_message: String::new(),
+                },
+            )),
         };
 
         let pw_event = RemoteConnection::proto_event_to_pw(&proto_event).unwrap();
@@ -875,17 +889,22 @@ mod tests {
         let proto_event = proto::Event {
             sequence: 3,
             timestamp_ms: 3000,
-            event: Some(proto::event::Event::ConnectionStatus(proto::ConnectionStatus {
-                state: proto::ConnectionState::Reconnecting as i32,
-                reconnect_attempt: 2,
-                max_reconnect_attempts: 5,
-                error_message: String::new(),
-            })),
+            event: Some(proto::event::Event::ConnectionStatus(
+                proto::ConnectionStatus {
+                    state: proto::ConnectionState::Reconnecting as i32,
+                    reconnect_attempt: 2,
+                    max_reconnect_attempts: 5,
+                    error_message: String::new(),
+                },
+            )),
         };
 
         let pw_event = RemoteConnection::proto_event_to_pw(&proto_event).unwrap();
         match pw_event {
-            PwEvent::Reconnecting { attempt, max_attempts } => {
+            PwEvent::Reconnecting {
+                attempt,
+                max_attempts,
+            } => {
                 assert_eq!(attempt, 2);
                 assert_eq!(max_attempts, 5);
             }
@@ -898,12 +917,14 @@ mod tests {
         let proto_event = proto::Event {
             sequence: 4,
             timestamp_ms: 4000,
-            event: Some(proto::event::Event::ConnectionStatus(proto::ConnectionStatus {
-                state: proto::ConnectionState::Error as i32,
-                reconnect_attempt: 0,
-                max_reconnect_attempts: 0,
-                error_message: "Test error".to_string(),
-            })),
+            event: Some(proto::event::Event::ConnectionStatus(
+                proto::ConnectionStatus {
+                    state: proto::ConnectionState::Error as i32,
+                    reconnect_attempt: 0,
+                    max_reconnect_attempts: 0,
+                    error_message: "Test error".to_string(),
+                },
+            )),
         };
 
         let pw_event = RemoteConnection::proto_event_to_pw(&proto_event).unwrap();

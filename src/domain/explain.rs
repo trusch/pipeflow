@@ -61,7 +61,10 @@ impl SpecialNodeType {
         // Check for loopback/virtual devices
         if name_lower.contains("loopback")
             || name_lower.contains("virtual")
-            || desc_lower.as_ref().map(|d| d.contains("loopback")).unwrap_or(false)
+            || desc_lower
+                .as_ref()
+                .map(|d| d.contains("loopback"))
+                .unwrap_or(false)
         {
             return Self::Loopback;
         }
@@ -76,7 +79,10 @@ impl SpecialNodeType {
 
         // Check for monitor sources
         if name_lower.contains("monitor")
-            || desc_lower.as_ref().map(|d| d.contains("monitor")).unwrap_or(false)
+            || desc_lower
+                .as_ref()
+                .map(|d| d.contains("monitor"))
+                .unwrap_or(false)
         {
             return Self::Monitor;
         }
@@ -158,7 +164,10 @@ pub fn explain_node(node: &Node, graph: &GraphState) -> String {
 
     // Status
     if !node.is_active {
-        lines.push(format!("{} Currently inactive (paused or suspended)", egui_phosphor::regular::WARNING));
+        lines.push(format!(
+            "{} Currently inactive (paused or suspended)",
+            egui_phosphor::regular::WARNING
+        ));
     }
 
     // Audio format
@@ -246,7 +255,10 @@ pub fn explain_node(node: &Node, graph: &GraphState) -> String {
                 .collect();
             let unique_sources: Vec<_> = dedup_strings(sources);
             if unique_sources.len() <= 3 {
-                lines.push(format!("Receives audio from: {}", unique_sources.join(", ")));
+                lines.push(format!(
+                    "Receives audio from: {}",
+                    unique_sources.join(", ")
+                ));
             } else {
                 lines.push(format!(
                     "Receives audio from: {} and {} others",
@@ -277,7 +289,11 @@ pub fn explain_node(node: &Node, graph: &GraphState) -> String {
 
     // Volume control error
     if let Some(err) = graph.volume_control_failed.get(&node.id) {
-        lines.push(format!("{} Volume control unavailable: {}", egui_phosphor::regular::WARNING, err));
+        lines.push(format!(
+            "{} Volume control unavailable: {}",
+            egui_phosphor::regular::WARNING,
+            err
+        ));
     }
 
     lines.join("\n")
@@ -399,9 +415,7 @@ fn layer_explanation(layer: NodeLayer) -> &'static str {
         NodeLayer::Pipewire => {
             "Internal PipeWire node (format adapters, channel mixers, virtual routing)"
         }
-        NodeLayer::Session => {
-            "Application or service managed by the session manager (WirePlumber)"
-        }
+        NodeLayer::Session => "Application or service managed by the session manager (WirePlumber)",
     }
 }
 

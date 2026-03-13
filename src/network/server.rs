@@ -115,7 +115,6 @@ impl GrpcServer {
     }
 }
 
-
 /// The gRPC service implementation.
 struct PipeflowService {
     state: SharedState,
@@ -279,7 +278,8 @@ impl Pipeflow for PipeflowService {
         if let Some(ref command) = cmd.command {
             match command {
                 proto::command::Command::SetSafetyMode(req) => {
-                    let mode = SafetyMode::from(proto::SafetyMode::try_from(req.mode).unwrap_or_default());
+                    let mode =
+                        SafetyMode::from(proto::SafetyMode::try_from(req.mode).unwrap_or_default());
                     let mut state = self.state.write();
                     state.safety.set_mode(mode);
                     return Ok(Response::new(proto::CommandResult {
@@ -340,12 +340,7 @@ mod tests {
         let (tx, _rx) = channel::unbounded();
         let command_handler = Arc::new(CommandHandler::new(tx));
 
-        GrpcServer::new(
-            "127.0.0.1:0".parse().unwrap(),
-            state,
-            command_handler,
-            None,
-        )
+        GrpcServer::new("127.0.0.1:0".parse().unwrap(), state, command_handler, None)
     }
 
     fn create_test_server_with_token(token: &str) -> GrpcServer {
@@ -741,4 +736,3 @@ mod tests {
         assert_eq!(result.error, "Unknown command");
     }
 }
-

@@ -8,7 +8,9 @@ use crate::core::state::GraphState;
 use crate::domain::graph::Node;
 use crate::domain::rules::{ConnectionSpec, MatchPattern};
 use crate::util::id::{NodeId, NodeIdentifier};
-use crate::util::layout::{force_directed_layout, get_metering_target_id, is_metering_node, LayoutConfig};
+use crate::util::layout::{
+    force_directed_layout, get_metering_target_id, is_metering_node, LayoutConfig,
+};
 use crate::util::spatial::Position;
 
 use super::PipeflowApp;
@@ -26,7 +28,10 @@ pub(crate) fn create_stable_identifier(node: &Node, graph: &GraphState) -> NodeI
                 return NodeIdentifier::new(
                     format!("pipeflow-meter-for:{}", main_node.name),
                     main_node.application_name.clone(),
-                    main_node.media_class.as_ref().map(|mc| mc.display_name().to_string()),
+                    main_node
+                        .media_class
+                        .as_ref()
+                        .map(|mc| mc.display_name().to_string()),
                 );
             }
         }
@@ -35,7 +40,9 @@ pub(crate) fn create_stable_identifier(node: &Node, graph: &GraphState) -> NodeI
     NodeIdentifier::new(
         node.name.clone(),
         node.application_name.clone(),
-        node.media_class.as_ref().map(|mc| mc.display_name().to_string()),
+        node.media_class
+            .as_ref()
+            .map(|mc| mc.display_name().to_string()),
     )
 }
 
@@ -82,11 +89,13 @@ impl PipeflowApp {
                 let members: Vec<_> = state.ui.selected_nodes.iter().copied().collect();
                 if !members.is_empty() {
                     // First, build identifiers before creating the group
-                    let identifiers: Vec<_> = members.iter()
+                    let identifiers: Vec<_> = members
+                        .iter()
                         .filter_map(|node_id| {
-                            state.graph.get_node(node_id).map(|node| {
-                                create_stable_identifier(node, &state.graph)
-                            })
+                            state
+                                .graph
+                                .get_node(node_id)
+                                .map(|node| create_stable_identifier(node, &state.graph))
                         })
                         .collect();
                     // Create the group with members
@@ -126,12 +135,23 @@ impl PipeflowApp {
     }
 
     /// Handles app commands sent to PipeWire.
-    pub(super) fn handle_app_command(&self, command: AppCommand) {
+    pub(super) fn handle_app_command(&mut self, command: AppCommand) {
         let state = self.state.read();
+        let safety_mode = state.safety.mode;
 
         if let Some(ref handler) = self.command_handler {
             if let Err(e) = handler.execute(command.clone(), &state.safety) {
                 tracing::error!("Command failed: {}", e);
+                let follow_up = match safety_mode {
+                    crate::domain::safety::SafetyMode::Normal => "Try again or check the PipeWire state.",
+                    crate::domain::safety::SafetyMode::ReadOnly => "Switch Safety back to Normal to make changes.",
+                    crate::domain::safety::SafetyMode::Stage => "Stage mode locks routing and volume. Switch Safety to Normal to edit the patch.",
+                };
+                self.components.status_message = Some((
+                    format!("{} {}", e, follow_up),
+                    std::time::Instant::now(),
+                    true,
+                ));
             }
         }
     }
@@ -150,7 +170,8 @@ impl PipeflowApp {
 
         ctx.input(|input| {
             // Ctrl+Z - Undo
-            if input.key_pressed(egui::Key::Z) && input.modifiers.command && !input.modifiers.shift {
+            if input.key_pressed(egui::Key::Z) && input.modifiers.command && !input.modifiers.shift
+            {
                 needs_undo = true;
             }
 
@@ -261,12 +282,10 @@ impl PipeflowApp {
                         self.components.graph_view.reset_view();
                     }
                     "increase_spacing" => {
-                        self.config.ui.grid_spacing =
-                            (self.config.ui.grid_spacing + 5.0).min(50.0);
+                        self.config.ui.grid_spacing = (self.config.ui.grid_spacing + 5.0).min(50.0);
                     }
                     "decrease_spacing" => {
-                        self.config.ui.grid_spacing =
-                            (self.config.ui.grid_spacing - 5.0).max(10.0);
+                        self.config.ui.grid_spacing = (self.config.ui.grid_spacing - 5.0).max(10.0);
                     }
                     "toggle_help" => {
                         self.components.show_help = !self.components.show_help;
@@ -285,7 +304,10 @@ impl PipeflowApp {
                     }
                     "save_snapshot" => {
                         // Quick-save snapshot with auto-generated name
-                        let name = format!("Snapshot {}", self.components.snapshot_manager.list().len() + 1);
+                        let name = format!(
+                            "Setup {}",
+                            self.components.snapshot_manager.list().len() + 1
+                        );
                         let state = self.state.read();
                         let result = self.components.snapshot_manager.capture(
                             name.clone(),
@@ -296,7 +318,7 @@ impl PipeflowApp {
                         match result {
                             Ok(_) => {
                                 self.components.status_message = Some((
-                                    format!("Snapshot '{}' saved", name),
+                                    format!("Saved setup '{}' created", name),
                                     std::time::Instant::now(),
                                     false,
                                 ));
@@ -342,12 +364,18 @@ impl PipeflowApp {
         let state = self.state.read();
 
         let nodes: Vec<_> = if selected_only {
-            state.graph.nodes.values()
+            state
+                .graph
+                .nodes
+                .values()
                 .filter(|n| state.ui.selected_nodes.contains(&n.id))
                 .map(|n| (n.id, n.media_class.clone(), n.name.clone()))
                 .collect()
         } else {
-            state.graph.nodes.values()
+            state
+                .graph
+                .nodes
+                .values()
                 .map(|n| (n.id, n.media_class.clone(), n.name.clone()))
                 .collect()
         };
@@ -357,13 +385,15 @@ impl PipeflowApp {
         }
 
         // Capture old positions before layout for undo
-        let old_positions: Vec<(NodeId, Position)> = nodes.iter()
-            .filter_map(|(id, _, _)| {
-                state.ui.node_positions.get(id).map(|pos| (*id, *pos))
-            })
+        let old_positions: Vec<(NodeId, Position)> = nodes
+            .iter()
+            .filter_map(|(id, _, _)| state.ui.node_positions.get(id).map(|pos| (*id, *pos)))
             .collect();
 
-        let links: Vec<_> = state.graph.links.values()
+        let links: Vec<_> = state
+            .graph
+            .links
+            .values()
             .map(|l| (l.output_node, l.input_node))
             .collect();
         let positions = state.ui.node_positions.clone();
@@ -371,24 +401,25 @@ impl PipeflowApp {
         drop(state);
 
         let new_positions = force_directed_layout(&nodes, &links, &positions, &config);
-        let new_positions_vec: Vec<(NodeId, Position)> = new_positions.iter()
-            .map(|(id, pos)| (*id, *pos))
-            .collect();
+        let new_positions_vec: Vec<(NodeId, Position)> =
+            new_positions.iter().map(|(id, pos)| (*id, *pos)).collect();
 
         for (id, pos) in &new_positions {
             self.handle_ui_command(UiCommand::SetNodePosition(*id, pos.x, pos.y));
         }
 
         // Push batch undo entry
-        let reverse_actions: Vec<UndoAction> = old_positions.iter()
+        let reverse_actions: Vec<UndoAction> = old_positions
+            .iter()
             .map(|(id, pos)| UndoAction::UiCommand(UiCommand::SetNodePosition(*id, pos.x, pos.y)))
             .collect();
-        let forward_actions: Vec<UndoAction> = new_positions_vec.iter()
+        let forward_actions: Vec<UndoAction> = new_positions_vec
+            .iter()
             .map(|(id, pos)| UndoAction::UiCommand(UiCommand::SetNodePosition(*id, pos.x, pos.y)))
             .collect();
 
         self.components.undo_stack.push(UndoEntry {
-            description: "Auto-Layout".to_string(),
+            description: "Organize Patch".to_string(),
             forward: UndoAction::Batch(forward_actions),
             reverse: UndoAction::Batch(reverse_actions),
         });
@@ -401,11 +432,17 @@ impl PipeflowApp {
         match action {
             UndoAction::AppCommand(cmd) => self.handle_app_command(cmd),
             UndoAction::UiCommand(cmd) => self.handle_ui_command(cmd),
-            UndoAction::RemoveLinkBetweenPorts { output_port, input_port } => {
+            UndoAction::RemoveLinkBetweenPorts {
+                output_port,
+                input_port,
+            } => {
                 // Find the link between these ports and remove it
                 let link_id = {
                     let state = self.state.read();
-                    state.graph.links.values()
+                    state
+                        .graph
+                        .links
+                        .values()
                         .find(|l| l.output_port == output_port && l.input_port == input_port)
                         .map(|l| l.id)
                 };
@@ -416,7 +453,11 @@ impl PipeflowApp {
                     }
                     self.handle_app_command(AppCommand::RemoveLink(link_id));
                 } else {
-                    tracing::warn!("Undo: could not find link between ports {:?} -> {:?}", output_port, input_port);
+                    tracing::warn!(
+                        "Undo: could not find link between ports {:?} -> {:?}",
+                        output_port,
+                        input_port
+                    );
                 }
             }
             UndoAction::Batch(actions) => {
@@ -465,7 +506,9 @@ impl PipeflowApp {
         let link_info = {
             let state = self.state.read();
             state.ui.selected_link.and_then(|link_id| {
-                state.graph.get_link(&link_id)
+                state
+                    .graph
+                    .get_link(&link_id)
                     .map(|l| (link_id, l.output_port, l.input_port))
             })
         };
@@ -573,9 +616,15 @@ impl PipeflowApp {
 
         let connection_count = connections.len();
         // Use the node name as the default rule name
-        let rule_name = primary_node_name.clone().map(|n| format!("{} connections", n));
+        let rule_name = primary_node_name
+            .clone()
+            .map(|n| format!("{} connections", n));
         let mut state = self.state.write();
-        let rule_id = state.ui.rules.create_from_snapshot(rule_name, connections, primary_node_name);
+        let rule_id =
+            state
+                .ui
+                .rules
+                .create_from_snapshot(rule_name, connections, primary_node_name);
         tracing::info!(
             "Created rule {:?} with {} connections",
             rule_id,
