@@ -56,22 +56,24 @@ impl PipeflowApp {
         node_id: crate::util::id::NodeId,
         port_id: crate::util::id::PortId,
         stale_threshold: std::time::Duration,
-    ) -> Option<f32> {
+    ) -> Option<(f32, bool)> {
         let meter = graph.meters.get(&node_id)?;
-        let activity = graph
+        if let Some(channel) = graph
             .get_port(&port_id)
             .and_then(|port| port.channel.map(|channel| channel as usize))
-            .map(|channel| meter.get_decayed_peak(channel, stale_threshold))
-            .unwrap_or_else(|| meter.get_decayed_max_peak(stale_threshold));
-        Some(activity)
+        {
+            Some((meter.get_decayed_peak(channel, stale_threshold), true))
+        } else {
+            Some((meter.get_decayed_max_peak(stale_threshold), false))
+        }
     }
 
     /// Updates link meter data based on meter activity from both ends of the link.
     ///
-    /// In some PipeWire routing setups, especially app->app chains like Spotify -> Ardour,
-    /// one endpoint may expose reliable meter data while the other does not. For visual
-    /// flow we care that the link is carrying signal, so we derive activity from either end
-    /// and take the stronger reading.
+    /// Prefer exact per-port/per-channel readings when available. This avoids a common
+    /// failure mode where changing one channel on a multi-output device makes all sibling
+    /// links pulse because we fell back to coarse node-wide activity. Only when we lack
+    /// channel information do we fall back to node-level meter activity.
     pub(super) fn update_link_meters(&mut self) {
         if !self.config.meters.enabled {
             return;
@@ -91,23 +93,34 @@ impl PipeflowApp {
             .values()
             .filter(|link| link.is_active)
             .map(|link| {
-                let source_activity = Self::meter_activity_for_node_port(
+                let source = Self::meter_activity_for_node_port(
                     &state.graph,
                     link.output_node,
                     link.output_port,
                     stale_threshold,
-                )
-                .unwrap_or(0.0);
+                );
 
-                let sink_activity = Self::meter_activity_for_node_port(
+                let sink = Self::meter_activity_for_node_port(
                     &state.graph,
                     link.input_node,
                     link.input_port,
                     stale_threshold,
-                )
-                .unwrap_or(0.0);
+                );
 
-                let activity = source_activity.max(sink_activity);
+                let activity = match (source, sink) {
+                    // Best case: both ends know the exact channel. Use the overlap.
+                    (Some((src, true)), Some((dst, true))) => src.min(dst),
+                    // If only one side is exact, trust it over coarse node-level activity.
+                    (Some((src, true)), Some((_dst, false))) => src,
+                    (Some((_src, false)), Some((dst, true))) => dst,
+                    (Some((src, true)), None) => src,
+                    (None, Some((dst, true))) => dst,
+                    // Only coarse node activity available: fall back to the stronger endpoint.
+                    (Some((src, false)), Some((dst, false))) => src.max(dst),
+                    (Some((src, false)), None) => src,
+                    (None, Some((dst, false))) => dst,
+                    (None, None) => 0.0,
+                };
                 (link.id, activity)
             })
             .collect();
