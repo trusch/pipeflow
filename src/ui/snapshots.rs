@@ -32,10 +32,7 @@ impl SceneRestorePreview {
         if self.unresolved_connections == 0 {
             "Ready".to_string()
         } else {
-            format!(
-                "{} waiting on missing nodes",
-                self.unresolved_connections
-            )
+            format!("{} waiting on missing nodes", self.unresolved_connections)
         }
     }
 }
@@ -256,16 +253,16 @@ impl SnapshotPanel {
                             ui.horizontal_wrapped(|ui| {
                                 ui.weak(format!("Create {} link(s)", preview.links_to_create));
                                 ui.weak(format!("Remove {} link(s)", preview.links_to_remove));
-                                ui.weak(format!("Adjust {} volume target(s)", preview.volume_changes));
+                                ui.weak(format!(
+                                    "Adjust {} volume target(s)",
+                                    preview.volume_changes
+                                ));
                             });
                             if preview.unresolved_connections > 0 {
                                 ui.add_space(4.0);
                                 ui.colored_label(
                                     Color32::from_rgb(255, 200, 100),
-                                    format!(
-                                        "{} unresolved",
-                                        preview.unresolved_connections
-                                    ),
+                                    format!("{} unresolved", preview.unresolved_connections),
                                 );
                                 if !preview.missing_nodes.is_empty() {
                                     let missing = preview.missing_nodes.join(", ");

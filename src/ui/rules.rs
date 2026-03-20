@@ -88,10 +88,7 @@ impl AutomationStatus {
             Self::Ready => format!("{} possible, none live", info.total_possible),
             Self::Active => format!("{}/{} live", info.total_active, info.total_possible),
             Self::Waiting => "Waiting for matching nodes".to_string(),
-            Self::Partial => format!(
-                "{}/{} live",
-                info.total_active, info.total_possible
-            ),
+            Self::Partial => format!("{}/{} live", info.total_active, info.total_possible),
         }
     }
 }
@@ -596,11 +593,7 @@ fn describe_rule_target(rule: &ConnectionRule) -> String {
     if rule.connections.len() == 1 {
         format!("To {}", destination_text)
     } else {
-        format!(
-            "To {} ({} steps)",
-            destination_text,
-            rule.connections.len()
-        )
+        format!("To {} ({} steps)", destination_text, rule.connections.len())
     }
 }
 
