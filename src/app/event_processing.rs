@@ -51,16 +51,36 @@ impl PipeflowApp {
         }
     }
 
-    /// Updates link meter data based on source node meters.
+    fn meter_activity_for_node_port(
+        graph: &crate::core::state::GraphState,
+        node_id: crate::util::id::NodeId,
+        port_id: crate::util::id::PortId,
+        stale_threshold: std::time::Duration,
+    ) -> Option<f32> {
+        let meter = graph.meters.get(&node_id)?;
+        let activity = graph
+            .get_port(&port_id)
+            .and_then(|port| port.channel.map(|channel| channel as usize))
+            .map(|channel| meter.get_decayed_peak(channel, stale_threshold))
+            .unwrap_or_else(|| meter.get_decayed_max_peak(stale_threshold));
+        Some(activity)
+    }
+
+    /// Updates link meter data based on meter activity from both ends of the link.
     ///
-    /// This drives the link flow visualization with glow and pulse effects.
+    /// In some PipeWire routing setups, especially app->app chains like Spotify -> Ardour,
+    /// one endpoint may expose reliable meter data while the other does not. For visual
+    /// flow we care that the link is carrying signal, so we derive activity from either end
+    /// and take the stronger reading.
     pub(super) fn update_link_meters(&mut self) {
         if !self.config.meters.enabled {
             return;
         }
 
         let dt = 1.0 / 60.0;
-        let stale_threshold = std::time::Duration::from_millis(100);
+        let refresh_hz = self.config.meters.refresh_rate.max(1) as u64;
+        let refresh_interval_ms = 1000 / refresh_hz;
+        let stale_threshold = std::time::Duration::from_millis((refresh_interval_ms * 4).max(120));
 
         let mut state = self.state.write();
 
@@ -71,19 +91,23 @@ impl PipeflowApp {
             .values()
             .filter(|link| link.is_active)
             .map(|link| {
-                let activity = state
-                    .graph
-                    .meters
-                    .get(&link.output_node)
-                    .map(|meter| {
-                        if let Some(port) = state.graph.get_port(&link.output_port) {
-                            if let Some(channel) = port.channel {
-                                return meter.get_decayed_peak(channel as usize, stale_threshold);
-                            }
-                        }
-                        meter.get_decayed_max_peak(stale_threshold)
-                    })
-                    .unwrap_or(0.0);
+                let source_activity = Self::meter_activity_for_node_port(
+                    &state.graph,
+                    link.output_node,
+                    link.output_port,
+                    stale_threshold,
+                )
+                .unwrap_or(0.0);
+
+                let sink_activity = Self::meter_activity_for_node_port(
+                    &state.graph,
+                    link.input_node,
+                    link.input_port,
+                    stale_threshold,
+                )
+                .unwrap_or(0.0);
+
+                let activity = source_activity.max(sink_activity);
                 (link.id, activity)
             })
             .collect();
