@@ -491,7 +491,7 @@ impl PipeflowApp {
                     .filter(|p| {
                         let node = state.graph.get_node(&p.node_id);
                         node.map(|n| {
-                            spec.output_pattern.matches(
+                            spec.output_pattern.matches_runtime(
                                 n.application_name.as_deref(),
                                 &n.name,
                                 &p.name,
@@ -511,7 +511,7 @@ impl PipeflowApp {
                     .filter(|p| {
                         let node = state.graph.get_node(&p.node_id);
                         node.map(|n| {
-                            spec.input_pattern.matches(
+                            spec.input_pattern.matches_runtime(
                                 n.application_name.as_deref(),
                                 &n.name,
                                 &p.name,

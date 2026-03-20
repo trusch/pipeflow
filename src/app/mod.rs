@@ -12,112 +12,30 @@
 
 mod command_handling;
 mod event_processing;
+mod feedback;
 mod initialization;
+mod snapshots;
+mod types;
 mod ui_panels;
 
-use crate::core::commands::{AppCommand, CommandHandler, CommandRegistry, UiCommand};
+pub(crate) use self::types::AppComponents;
+use self::types::{FeedbackLevel, GraphVisibilitySummary, WorkspaceSection};
+use crate::core::commands::{AppCommand, CommandHandler, UiCommand};
 use crate::core::config::Config;
 use crate::core::config::ThemePreference;
-use crate::core::history::{UndoAction, UndoEntry, UndoStack};
+use crate::core::history::{UndoAction, UndoEntry};
 use crate::core::state::SharedState;
-use crate::domain::snapshots::SnapshotManager;
 use crate::pipewire::connection::PwConnection;
 use crate::pipewire::meters::MeterCollector;
-use crate::ui::command_palette::CommandPalette;
 use crate::ui::filters::FilterPanel;
-use crate::ui::graph_view::GraphView;
-use crate::ui::groups::GroupPanel;
 use crate::ui::help::show_help;
 use crate::ui::node_panel::NodePanel;
-use crate::ui::rules::RulesPanel;
 use crate::ui::settings::SettingsPanel;
 use crate::ui::sidebar::{SidebarState, MAX_WIDTH, MIN_WIDTH};
-use crate::ui::snapshots::SnapshotPanel;
 use crate::ui::theme::Theme;
-use crate::ui::toolbar::Toolbar;
-use crate::util::id::{NodeId, NodeIdentifier};
+use crate::ui::toolbar::{SessionPresence, Toolbar};
+use crate::util::id::NodeIdentifier;
 use crate::util::spatial::Position;
-
-/// State for the rename node dialog.
-#[derive(Default)]
-pub(crate) struct RenameNodeDialog {
-    /// Node being renamed (None = dialog closed)
-    pub node_id: Option<NodeId>,
-    /// Current input text
-    pub input: String,
-}
-
-impl RenameNodeDialog {
-    /// Opens the dialog for a node with the current display name.
-    pub fn open(&mut self, node_id: NodeId, current_name: &str) {
-        self.node_id = Some(node_id);
-        self.input = current_name.to_string();
-    }
-
-    /// Closes the dialog.
-    pub fn close(&mut self) {
-        self.node_id = None;
-        self.input.clear();
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WorkspaceSection {
-    Patch,
-    AutoConnect,
-    SavedSetups,
-}
-
-impl WorkspaceSection {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Patch => "Patch",
-            Self::AutoConnect => "Auto Connect",
-            Self::SavedSetups => "Saved Setups",
-        }
-    }
-
-    fn icon(self) -> &'static str {
-        match self {
-            Self::Patch => egui_phosphor::regular::FLOW_ARROW,
-            Self::AutoConnect => egui_phosphor::regular::LINK,
-            Self::SavedSetups => egui_phosphor::regular::BOOKMARK_SIMPLE,
-        }
-    }
-
-    fn summary(self) -> &'static str {
-        match self {
-            Self::Patch => {
-                "Focus the graph, organize related nodes, and keep the current patch readable."
-            }
-            Self::AutoConnect => {
-                "Capture repeatable routing so the patch reconnects itself when nodes appear."
-            }
-            Self::SavedSetups => {
-                "Save the current setup and restore it later when you need a known-good scene."
-            }
-        }
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-struct GraphVisibilitySummary {
-    total_nodes: usize,
-    visible_nodes: usize,
-    hidden_by_focus: usize,
-    hidden_by_layer: usize,
-    hidden_background: usize,
-    dimmed_background: usize,
-}
-
-impl GraphVisibilitySummary {
-    fn has_hidden_state(self) -> bool {
-        self.hidden_by_focus > 0
-            || self.hidden_by_layer > 0
-            || self.hidden_background > 0
-            || self.dimmed_background > 0
-    }
-}
 
 /// Main application struct.
 ///
@@ -138,6 +56,8 @@ pub struct PipeflowApp {
     command_handler: Option<CommandHandler>,
     /// Whether running in remote mode
     is_remote: bool,
+    /// Explicit identity for the current local/remote session.
+    session_presence: SessionPresence,
 
     // --- Audio ---
     /// Meter collector for audio level data
@@ -154,109 +74,6 @@ pub struct PipeflowApp {
     // --- UI Components (grouped) ---
     /// UI components and transient state
     components: AppComponents,
-}
-
-/// UI components and transient state.
-///
-/// Groups UI-related fields to reduce the size of `PipeflowApp`
-/// and make the struct organization clearer.
-pub(crate) struct AppComponents {
-    // --- UI Components ---
-    /// Command registry for palette
-    pub command_registry: CommandRegistry,
-    /// Command palette UI
-    pub command_palette: CommandPalette,
-    /// Main graph visualization
-    pub graph_view: GraphView,
-    /// Groups management panel
-    pub group_panel: GroupPanel,
-    /// Rules management panel
-    pub rules_panel: RulesPanel,
-    /// Snapshot management panel
-    pub snapshot_panel: SnapshotPanel,
-    /// Snapshot manager (persistence)
-    pub snapshot_manager: SnapshotManager,
-    /// Visual theme settings
-    pub theme: Theme,
-
-    // --- Panel visibility flags ---
-    /// Show inspector panel
-    pub show_inspector: bool,
-    /// Show help panel
-    pub show_help: bool,
-    /// Show settings panel
-    pub show_settings: bool,
-
-    // --- State flags ---
-    /// Whether state needs layout save
-    pub needs_layout_save: bool,
-
-    // --- Undo/Redo ---
-    /// Undo/redo history stack
-    pub undo_stack: UndoStack,
-
-    // --- Dialogs ---
-    /// Rename node dialog state
-    pub rename_dialog: RenameNodeDialog,
-
-    // --- Status ---
-    /// Transient status message: (message, timestamp, is_error)
-    pub status_message: Option<(String, std::time::Instant, bool)>,
-
-    // --- Timing ---
-    /// Last layout save timestamp (for throttling)
-    pub last_layout_save: std::time::Instant,
-
-    // --- Layout ---
-    /// Last known viewport dimensions
-    pub last_viewport_size: (f32, f32),
-
-    // --- Sidebar state ---
-    /// Left sidebar state
-    pub left_sidebar: SidebarState,
-    /// Right sidebar state
-    pub right_sidebar: SidebarState,
-    /// Current left-side workspace grouping
-    pub active_workspace: WorkspaceSection,
-}
-
-impl AppComponents {
-    /// Creates new UI components with saved zoom/pan state.
-    fn new(saved_zoom: f32, saved_pan: egui::Vec2, _config: Config) -> Self {
-        let mut graph_view = GraphView::new();
-        graph_view.zoom = saved_zoom;
-        graph_view.pan = saved_pan;
-
-        let snapshot_manager = Config::data_dir()
-            .map(SnapshotManager::new)
-            .unwrap_or_else(|e| {
-                tracing::warn!("Failed to get data dir for snapshots: {}", e);
-                SnapshotManager::new(std::path::PathBuf::from("."))
-            });
-
-        Self {
-            command_registry: CommandRegistry::new(),
-            command_palette: CommandPalette::new(),
-            graph_view,
-            group_panel: GroupPanel::new(),
-            rules_panel: RulesPanel::new(),
-            snapshot_panel: SnapshotPanel::new(),
-            snapshot_manager,
-            theme: Theme::dark(),
-            show_inspector: true,
-            show_help: false,
-            show_settings: false,
-            needs_layout_save: false,
-            undo_stack: UndoStack::default(),
-            rename_dialog: RenameNodeDialog::default(),
-            status_message: None,
-            last_layout_save: std::time::Instant::now(),
-            last_viewport_size: (1000.0, 800.0),
-            left_sidebar: SidebarState::default(),
-            right_sidebar: SidebarState::default(),
-            active_workspace: WorkspaceSection::Patch,
-        }
-    }
 }
 
 impl eframe::App for PipeflowApp {
@@ -426,15 +243,17 @@ impl PipeflowApp {
                             if let Err(e) = self.config.save() {
                                 let msg = format!("Failed to save config: {}", e);
                                 tracing::error!("{}", msg);
-                                self.components.status_message =
-                                    Some((msg, std::time::Instant::now(), true));
+                                self.set_status_message(&msg, true);
+                                self.push_persistent_issue(
+                                    "settings-save-failed",
+                                    FeedbackLevel::Error,
+                                    "Could not save settings",
+                                    Some(msg.clone()),
+                                );
                             } else {
                                 tracing::info!("Configuration saved");
-                                self.components.status_message = Some((
-                                    "Settings saved".to_string(),
-                                    std::time::Instant::now(),
-                                    false,
-                                ));
+                                self.resolve_persistent_issue("settings-save-failed");
+                                self.set_status_message("Settings saved", false);
                             }
                         }
                     });
@@ -512,30 +331,6 @@ impl PipeflowApp {
         }
     }
 
-    /// Renders a transient status bar at the bottom for user notifications.
-    /// Messages auto-clear after 5 seconds.
-    fn render_status_bar(&mut self, ctx: &egui::Context) {
-        const STATUS_DURATION: std::time::Duration = std::time::Duration::from_secs(5);
-
-        // Auto-clear expired messages
-        if let Some((_, created, _)) = &self.components.status_message {
-            if created.elapsed() >= STATUS_DURATION {
-                self.components.status_message = None;
-            }
-        }
-
-        if let Some((msg, _, is_error)) = &self.components.status_message {
-            egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
-                let color = if *is_error {
-                    egui::Color32::from_rgb(255, 100, 100)
-                } else {
-                    ui.visuals().text_color()
-                };
-                ui.colored_label(color, msg);
-            });
-        }
-    }
-
     /// Renders the top toolbar.
     fn render_toolbar(&mut self, ctx: &egui::Context) {
         let safety_fill = {
@@ -567,6 +362,7 @@ impl PipeflowApp {
                     ui,
                     &state.safety,
                     state.connection,
+                    &self.session_presence,
                     &self.config.meters,
                     state.ui.hide_uninteresting,
                     &state.ui.layer_visibility,
@@ -716,7 +512,6 @@ impl PipeflowApp {
                 ui.vertical_centered(|ui| {
                     ui.add_space(8.0);
                     ui.label("ℹ");
-                    ui.weak("Inspector");
                 });
             } else {
                 let state = self.state.read();
@@ -910,6 +705,15 @@ impl PipeflowApp {
                 self.components.right_sidebar.expand();
             }
         }
+
+        if let Some(node_id) = response.rename_node {
+            let state = self.state.read();
+            if let Some(node) = state.graph.get_node(&node_id) {
+                let current_name = state.ui.resolved_display_name(node).to_string();
+                drop(state);
+                self.components.rename_dialog.open(node_id, &current_name);
+            }
+        }
     }
 
     /// Handles mute toggle from inspector.
@@ -1040,8 +844,7 @@ impl PipeflowApp {
                         }
                     }
                 });
-                ui.add_space(6.0);
-                ui.label(self.components.active_workspace.summary());
+                ui.add_space(4.0);
                 ui.separator();
 
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -1066,11 +869,17 @@ impl PipeflowApp {
                                 });
                         }
                         WorkspaceSection::AutoConnect => {
-                            egui::CollapsingHeader::new("Auto Connect")
+                            egui::CollapsingHeader::new("Rules")
                                 .default_open(true)
                                 .show(ui, |ui| {
-                                    ui.label("Reuse routing patterns instead of wiring the same patch by hand every time.");
-                                    ui.add_space(6.0);
+                                    let show_empty = {
+                                        let state = self.state.read();
+                                        state.ui.rules.is_empty()
+                                    };
+                                    if show_empty {
+                                        ui.weak("No rules yet. Create one here or from a node context menu.");
+                                        ui.add_space(6.0);
+                                    }
                                     let rules_response = {
                                         let mut guard = self.state.write();
                                         let state = &mut *guard;
@@ -1085,15 +894,20 @@ impl PipeflowApp {
                                 });
                         }
                         WorkspaceSection::SavedSetups => {
-                            egui::CollapsingHeader::new("Saved Setups")
+                            egui::CollapsingHeader::new("Scenes")
                                 .default_open(true)
                                 .show(ui, |ui| {
-                                    ui.label("Capture the current patch, then restore it later when you want to get back to a known-good setup.");
-                                    ui.add_space(6.0);
+                                    if self.components.snapshot_manager.list().is_empty() {
+                                        ui.weak("No saved setups yet.");
+                                        ui.add_space(6.0);
+                                    }
+                                    let state = self.state.read();
                                     let snap_response = self.components.snapshot_panel.show(
                                         ui,
                                         &self.components.snapshot_manager,
+                                        &state.graph,
                                     );
+                                    drop(state);
                                     self.handle_snapshot_panel_response(snap_response);
                                 });
                         }
@@ -1168,196 +982,6 @@ impl PipeflowApp {
     }
 
     /// Handles snapshot panel responses.
-    fn handle_snapshot_panel_response(
-        &mut self,
-        response: crate::ui::snapshots::SnapshotPanelResponse,
-    ) {
-        // Capture new snapshot
-        if let Some(name) = response.capture_snapshot {
-            let state = self.state.read();
-            let result = self.components.snapshot_manager.capture(
-                name.clone(),
-                &state.graph,
-                command_handling::create_stable_identifier,
-            );
-            drop(state);
-            match result {
-                Ok(_id) => {
-                    self.components.status_message = Some((
-                        format!("Snapshot '{}' saved", name),
-                        std::time::Instant::now(),
-                        false,
-                    ));
-                }
-                Err(e) => {
-                    let msg = format!("Failed to save snapshot: {}", e);
-                    tracing::error!("{}", msg);
-                    self.components.status_message = Some((msg, std::time::Instant::now(), true));
-                }
-            }
-        }
-
-        // Delete snapshot
-        if let Some(id) = response.delete_snapshot {
-            if let Err(e) = self.components.snapshot_manager.delete(id) {
-                let msg = format!("Failed to delete snapshot: {}", e);
-                tracing::error!("{}", msg);
-                self.components.status_message = Some((msg, std::time::Instant::now(), true));
-            }
-        }
-
-        // Restore snapshot
-        if let Some(id) = response.restore_snapshot {
-            self.restore_snapshot(id);
-        }
-    }
-
-    /// Restores a snapshot by diffing current connections and applying changes.
-    fn restore_snapshot(&mut self, id: uuid::Uuid) {
-        use crate::domain::graph::PortDirection;
-
-        let snapshot = match self.components.snapshot_manager.get(id) {
-            Some(s) => s.clone(),
-            None => return,
-        };
-
-        let state = self.state.read();
-
-        // Build a lookup: NodeIdentifier -> Vec<NodeId> for current graph
-        let mut identifier_to_nodes: std::collections::HashMap<
-            NodeIdentifier,
-            Vec<crate::util::id::NodeId>,
-        > = std::collections::HashMap::new();
-        for node in state.graph.nodes.values() {
-            let ident = command_handling::create_stable_identifier(node, &state.graph);
-            identifier_to_nodes.entry(ident).or_default().push(node.id);
-        }
-
-        // Resolve snapshot connections to port IDs
-        let mut desired_links: std::collections::HashSet<(
-            crate::util::id::PortId,
-            crate::util::id::PortId,
-        )> = std::collections::HashSet::new();
-        let mut unresolved = 0usize;
-
-        for conn in &snapshot.connections {
-            // Find output port
-            let out_port = identifier_to_nodes
-                .get(&conn.output_node)
-                .and_then(|node_ids| {
-                    node_ids.iter().find_map(|nid| {
-                        state.graph.ports.values().find(|p| {
-                            p.node_id == *nid
-                                && p.name == conn.output_port_name
-                                && p.direction == PortDirection::Output
-                        })
-                    })
-                });
-
-            // Find input port
-            let in_port = identifier_to_nodes
-                .get(&conn.input_node)
-                .and_then(|node_ids| {
-                    node_ids.iter().find_map(|nid| {
-                        state.graph.ports.values().find(|p| {
-                            p.node_id == *nid
-                                && p.name == conn.input_port_name
-                                && p.direction == PortDirection::Input
-                        })
-                    })
-                });
-
-            match (out_port, in_port) {
-                (Some(op), Some(ip)) => {
-                    desired_links.insert((op.id, ip.id));
-                }
-                _ => {
-                    unresolved += 1;
-                }
-            }
-        }
-
-        // Diff: find links to remove (exist now but not in snapshot)
-        let mut links_to_remove = Vec::new();
-        for link in state.graph.links.values() {
-            let key = (link.output_port, link.input_port);
-            if !desired_links.contains(&key) {
-                links_to_remove.push(link.id);
-            }
-        }
-
-        // Diff: find links to create (in snapshot but not in current graph)
-        let mut links_to_create = Vec::new();
-        for &(out_port, in_port) in &desired_links {
-            let exists = state
-                .graph
-                .links
-                .values()
-                .any(|l| l.output_port == out_port && l.input_port == in_port);
-            if !exists {
-                links_to_create.push((out_port, in_port));
-            }
-        }
-
-        // Resolve volume changes
-        let mut volume_changes: Vec<(
-            crate::util::id::NodeId,
-            crate::domain::audio::VolumeControl,
-        )> = Vec::new();
-        for sv in &snapshot.volumes {
-            if let Some(node_ids) = identifier_to_nodes.get(&sv.identifier) {
-                for &nid in node_ids {
-                    volume_changes.push((nid, sv.volume.clone()));
-                }
-            }
-        }
-
-        drop(state);
-
-        // Apply removals
-        for link_id in &links_to_remove {
-            {
-                let mut state = self.state.write();
-                state.graph.remove_link(link_id);
-            }
-            self.handle_app_command(AppCommand::RemoveLink(*link_id));
-        }
-
-        // Apply creations
-        for (output_port, input_port) in &links_to_create {
-            self.handle_app_command(AppCommand::CreateLink {
-                output_port: *output_port,
-                input_port: *input_port,
-            });
-        }
-
-        // Apply volume changes
-        for (node_id, volume) in &volume_changes {
-            {
-                let mut state = self.state.write();
-                state.graph.volumes.insert(*node_id, volume.clone());
-            }
-            self.handle_app_command(AppCommand::SetVolume {
-                node_id: *node_id,
-                volume: volume.clone(),
-            });
-        }
-
-        let msg = format!(
-            "Restored '{}': -{} +{} links{}",
-            snapshot.name,
-            links_to_remove.len(),
-            links_to_create.len(),
-            if unresolved > 0 {
-                format!(" ({} unresolved)", unresolved)
-            } else {
-                String::new()
-            }
-        );
-        tracing::info!("{}", msg);
-        self.components.status_message = Some((msg, std::time::Instant::now(), false));
-    }
-
     /// Applies a rule immediately (manual trigger).
     fn apply_rule_now(&mut self, rule_id: crate::util::id::RuleId) {
         use crate::domain::graph::PortDirection;
@@ -1381,7 +1005,7 @@ impl PipeflowApp {
                     .filter(|p| {
                         let node = state.graph.get_node(&p.node_id);
                         node.map(|n| {
-                            spec.output_pattern.matches(
+                            spec.output_pattern.matches_runtime(
                                 n.application_name.as_deref(),
                                 &n.name,
                                 &p.name,
@@ -1401,7 +1025,7 @@ impl PipeflowApp {
                     .filter(|p| {
                         let node = state.graph.get_node(&p.node_id);
                         node.map(|n| {
-                            spec.input_pattern.matches(
+                            spec.input_pattern.matches_runtime(
                                 n.application_name.as_deref(),
                                 &n.name,
                                 &p.name,
@@ -1452,6 +1076,8 @@ impl PipeflowApp {
             self.components.last_viewport_size = (available.width(), available.height());
 
             let state = self.state.read();
+            let is_patch_empty = state.graph.nodes.is_empty();
+            let has_selection = !state.ui.selected_nodes.is_empty() || state.ui.selected_link.is_some();
             let response = self.components.graph_view.show(
                 ui,
                 &state.graph,
@@ -1469,6 +1095,32 @@ impl PipeflowApp {
                 self.config.ui.show_minimap,
             );
             drop(state);
+
+            if is_patch_empty {
+                egui::Window::new("patch_empty_teaching")
+                    .title_bar(false)
+                    .resizable(false)
+                    .movable(false)
+                    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                    .show(ctx, |ui| {
+                        ui.set_max_width(360.0);
+                        ui.heading("Waiting for audio nodes");
+                        ui.label("Open an app, unmute a device, or connect to a remote machine. As nodes appear, drag from a port to patch them together.");
+                    });
+            } else if !has_selection {
+                egui::Area::new("patch_teaching_hint".into())
+                    .anchor(egui::Align2::RIGHT_BOTTOM, [-16.0, -16.0])
+                    .show(ctx, |ui| {
+                        egui::Frame::NONE
+                            .fill(egui::Color32::from_rgba_unmultiplied(20, 20, 25, 210))
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(120, 200, 255, 80)))
+                            .corner_radius(8)
+                            .inner_margin(egui::Margin::same(8))
+                            .show(ui, |ui| {
+                                ui.label("Click a node to inspect it, or drag from a port to start a connection.");
+                            });
+                    });
+            }
 
             self.handle_graph_view_response(ctx, response);
         });
@@ -1766,10 +1418,18 @@ impl PipeflowApp {
     fn save_layout(&mut self) {
         if let Ok(manager) = crate::core::config::LayoutManager::new() {
             let state = self.state.read();
-            if let Err(e) = manager.save(&state.ui) {
+            let save_result = manager.save(&state.ui);
+            drop(state);
+            if let Err(e) = save_result {
                 let msg = format!("Failed to save layout: {}", e);
                 tracing::error!("{}", msg);
-                self.components.status_message = Some((msg, std::time::Instant::now(), true));
+                self.set_status_message(&msg, true);
+                self.push_persistent_issue(
+                    "layout-save-failed",
+                    FeedbackLevel::Error,
+                    "Could not save the current layout",
+                    Some(msg.clone()),
+                );
             }
         }
     }

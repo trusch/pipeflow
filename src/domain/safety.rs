@@ -38,6 +38,7 @@ impl SafetyMode {
     }
 
     /// Returns a short indicator string for the mode.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn indicator(&self) -> &'static str {
         match self {
             Self::Normal => "",
@@ -122,11 +123,13 @@ impl SafetyController {
     }
 
     /// Returns true if the UI should show safety indicators.
+    #[allow(dead_code)]
     pub fn should_show_indicator(&self) -> bool {
         self.mode != SafetyMode::Normal
     }
 
     /// Returns a summary of the current safety state.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn status_summary(&self) -> String {
         if self.mode != SafetyMode::Normal {
             self.mode.indicator().to_string()

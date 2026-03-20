@@ -42,6 +42,10 @@ pub struct Cli {
     #[arg(long, short = 'i')]
     pub identity: Option<String>,
 
+    /// Skip auto-detection of local headless instance and always use direct PipeWire
+    #[arg(long)]
+    pub standalone: bool,
+
     /// Enable verbose logging
     #[arg(long, short)]
     pub verbose: bool,

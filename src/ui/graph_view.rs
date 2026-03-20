@@ -2,230 +2,27 @@
 //!
 //! Renders the PipeWire graph with nodes, ports, and connections.
 
+mod geometry;
+mod helpers;
+mod types;
+
+use self::geometry::{cubic_bezier, interpolate_color, GraphTransform};
+use self::helpers::{media_class_icon, truncate_text_measured};
+use self::types::{ConnectionDrag, ContextMenuTarget, LodLevel};
+pub use self::types::{GraphView, GraphViewResponse};
 use crate::core::state::{GraphState, LayerVisibility};
 use crate::domain::explain::explain_node_short;
 use crate::domain::filters::FilterSet;
-use crate::domain::graph::MediaClass;
-use crate::util::is_metering_node;
-
-/// Returns a Phosphor icon string for a given media class, or None for unknown/other.
-fn media_class_icon(media_class: Option<&MediaClass>) -> Option<&'static str> {
-    match media_class {
-        Some(MediaClass::AudioSource) => Some(egui_phosphor::regular::MICROPHONE),
-        Some(MediaClass::AudioSink) => Some(egui_phosphor::regular::SPEAKER_HIGH),
-        Some(MediaClass::StreamInputAudio) => Some(egui_phosphor::regular::WAVEFORM),
-        Some(MediaClass::StreamOutputAudio) => Some(egui_phosphor::regular::WAVEFORM),
-        Some(MediaClass::MidiSource) | Some(MediaClass::MidiSink) => {
-            Some(egui_phosphor::regular::PIANO_KEYS)
-        }
-        Some(MediaClass::VideoSource)
-        | Some(MediaClass::VideoSink)
-        | Some(MediaClass::VideoDevice) => Some(egui_phosphor::regular::MONITOR_PLAY),
-        Some(MediaClass::AudioDevice) => Some(egui_phosphor::regular::SPEAKER_HIGH),
-        Some(MediaClass::AudioVideoSource) => Some(egui_phosphor::regular::MONITOR_PLAY),
-        _ => None,
-    }
-}
-
-/// Truncates a string to fit within a maximum width in pixels using actual font measurement.
-/// Uses smart truncation: shows beginning and end of text (e.g., "playback_F..._FL")
-/// to keep distinguishing characters visible.
-fn truncate_text_measured(
-    text: &str,
-    max_width: f32,
-    font_id: &egui::FontId,
-    fonts: &mut egui::epaint::text::FontsView<'_>,
-) -> String {
-    if max_width <= 0.0 {
-        return String::new();
-    }
-
-    // Measure full text width
-    let full_width = measure_text_width(text, font_id, fonts);
-    if full_width <= max_width {
-        return text.to_string();
-    }
-
-    let text_chars: Vec<char> = text.chars().collect();
-    let text_len = text_chars.len();
-
-    if text_len <= 2 {
-        return text.to_string();
-    }
-
-    // Measure ellipsis width
-    let ellipsis = "..";
-    let ellipsis_width = measure_text_width(ellipsis, font_id, fonts);
-
-    // If ellipsis alone doesn't fit, return empty or minimal
-    if ellipsis_width >= max_width {
-        return String::new();
-    }
-
-    let available_width = max_width - ellipsis_width;
-
-    // Use binary search to find optimal split
-    // We want to maximize (start_chars + end_chars) such that
-    // width(start) + width(end) <= available_width
-    // Split roughly 60/40 favoring the start for context
-    let mut best_start = 0usize;
-    let mut best_end = 0usize;
-
-    // Try different start lengths, then find matching end length
-    for start_chars in (1..=text_len.saturating_sub(1)).rev() {
-        let start: String = text_chars[..start_chars].iter().collect();
-        let start_width = measure_text_width(&start, font_id, fonts);
-
-        if start_width > available_width {
-            continue;
-        }
-
-        let remaining_width = available_width - start_width;
-
-        // Find how many end chars fit in remaining width
-        for end_chars in (0..=text_len.saturating_sub(start_chars)).rev() {
-            if end_chars == 0 {
-                // Just start + ellipsis
-                if start_chars > best_start + best_end {
-                    best_start = start_chars;
-                    best_end = 0;
-                }
-                break;
-            }
-
-            let end: String = text_chars[text_len - end_chars..].iter().collect();
-            let end_width = measure_text_width(&end, font_id, fonts);
-
-            if end_width <= remaining_width {
-                let total_chars = start_chars + end_chars;
-                if total_chars > best_start + best_end {
-                    best_start = start_chars;
-                    best_end = end_chars;
-                }
-                break;
-            }
-        }
-
-        // Early exit if we found a good solution with most chars
-        if best_start + best_end >= text_len.saturating_sub(2) {
-            break;
-        }
-    }
-
-    if best_start == 0 && best_end == 0 {
-        return ellipsis.to_string();
-    }
-
-    let start: String = text_chars[..best_start].iter().collect();
-    if best_end == 0 {
-        format!("{}{}", start, ellipsis)
-    } else {
-        let end: String = text_chars[text_len - best_end..].iter().collect();
-        format!("{}{}{}", start, ellipsis, end)
-    }
-}
-
-/// Measures the width of text using egui's font system.
-#[inline]
-fn measure_text_width(
-    text: &str,
-    font_id: &egui::FontId,
-    fonts: &mut egui::epaint::text::FontsView<'_>,
-) -> f32 {
-    let job = egui::text::LayoutJob::simple_singleline(
-        text.to_string(),
-        font_id.clone(),
-        egui::Color32::WHITE,
-    );
-    fonts.layout_job(job).rect.width()
-}
-
 use crate::domain::graph::{Link, Node, Port, PortDirection};
 use crate::domain::groups::GroupManager;
 use crate::ui::theme::Theme;
 use crate::util::id::{LinkId, NodeId, PortId};
+use crate::util::is_metering_node;
 use crate::util::spatial::Position;
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use std::collections::{HashMap, HashSet};
 
-/// Level of detail for rendering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LodLevel {
-    /// Minimal rendering - just colored rectangles
-    Minimal,
-    /// Low detail - ports but no labels
-    Low,
-    /// Full detail - everything
-    Full,
-}
-
-/// Target for context menu (locked when menu opens).
-#[derive(Debug, Clone, Copy)]
-enum ContextMenuTarget {
-    None,
-    Link(LinkId),
-    Background,
-}
-
-/// Graph view state.
-#[derive(Debug, Clone)]
-pub struct GraphView {
-    /// Current zoom level
-    pub zoom: f32,
-    /// Pan offset
-    pub pan: Vec2,
-    /// Connection being created
-    creating_connection: Option<ConnectionDrag>,
-    /// Hovered node
-    hovered_node: Option<NodeId>,
-    /// Hovered port
-    hovered_port: Option<PortId>,
-    /// Hovered link
-    hovered_link: Option<LinkId>,
-    /// Box selection state (start position in screen coords)
-    box_selection_start: Option<Pos2>,
-    /// Context menu target (locked when menu opens)
-    context_menu_target: ContextMenuTarget,
-    /// Per-node opacity for fade-in animation (0.0 = invisible, 1.0 = fully visible)
-    node_alphas: HashMap<NodeId, f32>,
-    /// Whether the minimap is currently being dragged
-    minimap_dragging: bool,
-}
-
-/// State of a connection being dragged.
-#[derive(Debug, Clone)]
-struct ConnectionDrag {
-    /// Starting port
-    from_port: PortId,
-    /// Starting port direction
-    from_direction: PortDirection,
-    /// Current mouse position
-    current_pos: Pos2,
-}
-
-impl Default for GraphView {
-    fn default() -> Self {
-        Self {
-            zoom: 1.0,
-            pan: Vec2::ZERO,
-            creating_connection: None,
-            hovered_node: None,
-            hovered_port: None,
-            hovered_link: None,
-            box_selection_start: None,
-            context_menu_target: ContextMenuTarget::None,
-            node_alphas: HashMap::new(),
-            minimap_dragging: false,
-        }
-    }
-}
-
 impl GraphView {
-    /// Creates a new graph view.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Calculates the screen position of a port.
     /// This is the single source of truth for port positions.
     fn get_port_screen_position(
@@ -461,6 +258,9 @@ impl GraphView {
             }
 
             let is_selected = selected_link == Some(link.id);
+            let selection_active = !selected_nodes.is_empty() || selected_link.is_some();
+            let touches_selection = selected_nodes.contains(&link.output_node)
+                || selected_nodes.contains(&link.input_node);
             self.draw_link(
                 ui,
                 link,
@@ -471,6 +271,8 @@ impl GraphView {
                 mouse_pos,
                 is_selected,
                 is_link_uninteresting,
+                selection_active,
+                touches_selection,
             );
         }
 
@@ -530,6 +332,7 @@ impl GraphView {
                 node_positions,
                 is_selected,
                 is_uninteresting,
+                !selected_nodes.is_empty() || selected_link.is_some(),
                 false, // is_meter
                 &transform,
                 theme,
@@ -550,6 +353,7 @@ impl GraphView {
                 node_positions,
                 is_selected,
                 is_uninteresting,
+                !selected_nodes.is_empty() || selected_link.is_some(),
                 true, // is_meter
                 &transform,
                 theme,
@@ -611,6 +415,7 @@ impl GraphView {
                 &transform,
                 theme,
             );
+            self.draw_connection_hint(ui, drag, graph);
         }
 
         // Draw box selection rectangle
@@ -1110,6 +915,7 @@ impl GraphView {
         positions: &HashMap<NodeId, Position>,
         is_selected: bool,
         is_uninteresting: bool,
+        selection_active: bool,
         is_meter: bool,
         transform: &GraphTransform,
         theme: &Theme,
@@ -1170,7 +976,7 @@ impl GraphView {
 
         // Helper to dim colors for uninteresting nodes and apply fade-in alpha
         let dim_color = |color: Color32| -> Color32 {
-            let (r, g, b, a) = if is_uninteresting {
+            let (mut r, mut g, mut b, mut a) = if is_uninteresting {
                 // Reduce saturation and brightness for greyed out appearance
                 let r = (color.r() as f32 * 0.4 + 40.0) as u8;
                 let g = (color.g() as f32 * 0.4 + 40.0) as u8;
@@ -1180,6 +986,12 @@ impl GraphView {
             } else {
                 (color.r(), color.g(), color.b(), color.a())
             };
+            if selection_active && !is_selected {
+                r = (r as f32 * 0.88) as u8;
+                g = (g as f32 * 0.88) as u8;
+                b = (b as f32 * 0.9) as u8;
+                a = (a as f32 * 0.78) as u8;
+            }
             // Apply fade-in alpha
             let a = (a as f32 * node_alpha) as u8;
             Color32::from_rgba_unmultiplied(r, g, b, a)
@@ -1372,6 +1184,8 @@ impl GraphView {
         let port_start_y = current_y + 4.0;
         let draw_port_labels = lod == LodLevel::Full;
 
+        let creating_connection = self.creating_connection.clone();
+
         for (i, port) in input_ports.iter().enumerate() {
             let port_y = port_start_y + (i as f32 * theme.sizes.port_height * self.zoom);
             self.draw_port_with_lod(
@@ -1384,6 +1198,7 @@ impl GraphView {
                 theme,
                 response,
                 node_alpha,
+                creating_connection.as_ref(),
             );
         }
 
@@ -1399,6 +1214,7 @@ impl GraphView {
                 theme,
                 response,
                 node_alpha,
+                creating_connection.as_ref(),
             );
         }
 
@@ -1576,6 +1392,7 @@ impl GraphView {
         theme: &Theme,
         response: &mut GraphViewResponse,
         node_alpha: f32,
+        drag: Option<&ConnectionDrag>,
     ) {
         let painter = ui.painter();
 
@@ -1595,16 +1412,54 @@ impl GraphView {
             port.is_control,
             port.is_monitor,
         );
-        let color = Color32::from_rgba_unmultiplied(
+
+        let mut fill_color = Color32::from_rgba_unmultiplied(
             base_color.r(),
             base_color.g(),
             base_color.b(),
             (base_color.a() as f32 * node_alpha) as u8,
         );
 
+        let mut outline = Stroke::NONE;
+        let mut halo: Option<(Color32, f32)> = None;
+        if let Some(drag) = drag {
+            if drag.from_port == port.id {
+                halo = Some((
+                    Color32::from_rgba_unmultiplied(120, 200, 255, 70),
+                    8.0 * self.zoom,
+                ));
+                outline = Stroke::new(2.0, Color32::from_rgb(120, 200, 255));
+            } else {
+                let direction_ok = drag.from_direction != port.direction;
+                let different_node = drag.from_port != port.id;
+                let compatible = direction_ok && different_node;
+                if compatible {
+                    fill_color = Color32::from_rgba_unmultiplied(110, 220, 150, 240);
+                    halo = Some((
+                        Color32::from_rgba_unmultiplied(110, 220, 150, 60),
+                        8.0 * self.zoom,
+                    ));
+                    outline = Stroke::new(2.0, Color32::from_rgb(110, 220, 150));
+                } else if self.hovered_port == Some(port.id) {
+                    fill_color = Color32::from_rgba_unmultiplied(255, 170, 110, 230);
+                    halo = Some((
+                        Color32::from_rgba_unmultiplied(255, 170, 110, 45),
+                        7.0 * self.zoom,
+                    ));
+                    outline = Stroke::new(1.5, Color32::from_rgb(255, 170, 110));
+                }
+            }
+        }
+
         // Draw port circle
         let radius = theme.sizes.port_radius * self.zoom;
-        painter.circle_filled(circle_center, radius, color);
+        if let Some((halo_color, halo_radius)) = halo {
+            painter.circle_filled(circle_center, halo_radius, halo_color);
+        }
+        painter.circle_filled(circle_center, radius, fill_color);
+        if outline != Stroke::NONE {
+            painter.circle_stroke(circle_center, radius + self.zoom, outline);
+        }
 
         // Port name (only at full LOD, truncated to fit)
         if draw_labels {
@@ -1814,6 +1669,8 @@ impl GraphView {
         mouse_pos: Pos2,
         is_selected: bool,
         is_uninteresting: bool,
+        selection_active: bool,
+        touches_selection: bool,
     ) {
         // Get port positions using the unified calculation
         let from_pos = match self.get_port_screen_position(
@@ -1918,6 +1775,12 @@ impl GraphView {
                 160, // Slightly transparent but more visible than disabled
             );
             (faded, theme.sizes.wire_thickness * 0.8) // Slightly thinner
+        } else if selection_active && !touches_selection {
+            let base = theme.wire.audio;
+            (
+                Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 90),
+                theme.sizes.wire_thickness * 0.85,
+            )
         } else {
             // Normal active link - color based on flow level
             let base_color = match color_hint {
@@ -2185,6 +2048,56 @@ impl GraphView {
 
     /// Draws the connection currently being created, with optional snap to target.
     #[allow(clippy::too_many_arguments)]
+    fn draw_connection_hint(&self, ui: &mut Ui, drag: &ConnectionDrag, graph: &GraphState) {
+        let hovered_port = self
+            .hovered_port
+            .and_then(|port_id| graph.get_port(&port_id));
+        let (title, color) = match hovered_port {
+            Some(port) if port.id == drag.from_port => (
+                "Pick a different port to create a connection",
+                Color32::from_rgb(255, 170, 110),
+            ),
+            Some(port) if port.direction == drag.from_direction => (
+                "Connect outputs to inputs",
+                Color32::from_rgb(255, 170, 110),
+            ),
+            Some(_) => ("Release to connect", Color32::from_rgb(110, 220, 150)),
+            None => (
+                "Drag to a compatible port",
+                Color32::from_rgb(120, 200, 255),
+            ),
+        };
+
+        let rect = ui.max_rect();
+        let painter = ui.painter();
+        let box_rect = Rect::from_min_size(
+            Pos2::new(rect.left() + 16.0, rect.bottom() - 44.0),
+            Vec2::new(250.0, 28.0),
+        );
+        painter.rect_filled(
+            box_rect,
+            8.0,
+            Color32::from_rgba_unmultiplied(20, 20, 25, 210),
+        );
+        painter.rect_stroke(
+            box_rect,
+            8.0,
+            Stroke::new(
+                1.0,
+                Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 120),
+            ),
+            egui::StrokeKind::Outside,
+        );
+        painter.text(
+            box_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            title,
+            egui::FontId::proportional(13.0),
+            color,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn draw_creating_connection_with_snap(
         &self,
         ui: &mut Ui,
@@ -2285,91 +2198,6 @@ impl GraphView {
     }
 }
 
-/// Coordinate transform for graph view.
-struct GraphTransform {
-    center: Pos2,
-    zoom: f32,
-    pan: Vec2,
-}
-
-impl GraphTransform {
-    fn new(center: Pos2, zoom: f32, pan: Vec2) -> Self {
-        Self { center, zoom, pan }
-    }
-
-    fn graph_to_screen(&self, pos: Pos2) -> Pos2 {
-        Pos2::new(
-            self.center.x + (pos.x * self.zoom) + self.pan.x,
-            self.center.y + (pos.y * self.zoom) + self.pan.y,
-        )
-    }
-
-    fn screen_to_graph(&self, pos: Pos2) -> Pos2 {
-        Pos2::new(
-            (pos.x - self.center.x - self.pan.x) / self.zoom,
-            (pos.y - self.center.y - self.pan.y) / self.zoom,
-        )
-    }
-}
-
-/// Cubic bezier interpolation.
-fn cubic_bezier(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, t: f32) -> Pos2 {
-    let t2 = t * t;
-    let t3 = t2 * t;
-    let mt = 1.0 - t;
-    let mt2 = mt * mt;
-    let mt3 = mt2 * mt;
-
-    Pos2::new(
-        mt3 * p0.x + 3.0 * mt2 * t * p1.x + 3.0 * mt * t2 * p2.x + t3 * p3.x,
-        mt3 * p0.y + 3.0 * mt2 * t * p1.y + 3.0 * mt * t2 * p2.y + t3 * p3.y,
-    )
-}
-
-/// Interpolates between two colors.
-fn interpolate_color(a: Color32, b: Color32, t: f32) -> Color32 {
-    let t = t.clamp(0.0, 1.0);
-    Color32::from_rgba_unmultiplied(
-        (a.r() as f32 + (b.r() as f32 - a.r() as f32) * t) as u8,
-        (a.g() as f32 + (b.g() as f32 - a.g() as f32) * t) as u8,
-        (a.b() as f32 + (b.b() as f32 - a.b() as f32) * t) as u8,
-        (a.a() as f32 + (b.a() as f32 - a.a() as f32) * t) as u8,
-    )
-}
-
-/// Response from the graph view.
-#[derive(Debug, Default)]
-pub struct GraphViewResponse {
-    /// Node that was clicked
-    pub clicked_node: Option<NodeId>,
-    /// Node being dragged and the delta
-    pub dragged_node: Option<(NodeId, Vec2)>,
-    /// Port where connection started
-    pub started_connection: Option<PortId>,
-    /// Connection completed (output_port, input_port)
-    pub completed_connection: Option<(PortId, PortId)>,
-    /// Link that was clicked
-    pub clicked_link: Option<LinkId>,
-    /// Link to remove (from context menu)
-    pub remove_link: Option<LinkId>,
-    /// Link to toggle (link_id, new_active_state)
-    pub toggle_link: Option<(LinkId, bool)>,
-    /// Background was clicked
-    pub clicked_background: bool,
-    /// Nodes selected by box selection
-    pub box_selected_nodes: Vec<NodeId>,
-    /// Whether box selection should add to existing selection (shift held)
-    pub box_selection_additive: bool,
-    /// Snap to grid requested (None = all nodes, Some = specific nodes)
-    pub snap_to_grid: Option<Option<Vec<NodeId>>>,
-    /// Toggle uninteresting status for nodes
-    pub toggle_uninteresting: Option<Vec<NodeId>>,
-    /// Save node's connections as a rule
-    pub save_connections_as_rule: Option<NodeId>,
-    /// Request to rename a node (opens rename dialog)
-    pub rename_node: Option<NodeId>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2404,21 +2232,5 @@ mod tests {
         view.reset_view();
         assert_eq!(view.zoom, 1.0);
         assert_eq!(view.pan, Vec2::ZERO);
-    }
-
-    #[test]
-    fn test_cubic_bezier() {
-        let p0 = Pos2::new(0.0, 0.0);
-        let p1 = Pos2::new(0.0, 1.0);
-        let p2 = Pos2::new(1.0, 1.0);
-        let p3 = Pos2::new(1.0, 0.0);
-
-        let start = cubic_bezier(p0, p1, p2, p3, 0.0);
-        let end = cubic_bezier(p0, p1, p2, p3, 1.0);
-
-        assert!((start.x - p0.x).abs() < 0.001);
-        assert!((start.y - p0.y).abs() < 0.001);
-        assert!((end.x - p3.x).abs() < 0.001);
-        assert!((end.y - p3.y).abs() < 0.001);
     }
 }

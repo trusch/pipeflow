@@ -5,11 +5,11 @@
 use crate::core::state::GraphState;
 use crate::domain::audio::VolumeControl;
 use crate::domain::explain::explain_node;
-use crate::domain::graph::{Node, Port, PortDirection};
+use crate::domain::graph::{Link, Node, Port, PortDirection};
 use crate::ui::help_texts::help_button;
 use crate::ui::theme::Theme;
 use crate::util::id::NodeId;
-use egui::Ui;
+use egui::{RichText, Ui};
 use std::collections::HashSet;
 
 /// Node inspection panel.
@@ -29,7 +29,6 @@ impl NodePanel {
         if node_ids.is_empty() {
             Self::show_empty_state(ui, theme);
         } else if node_ids.len() == 1 {
-            // Single node - show full details
             if let Some(node) = graph.get_node(&node_ids[0]) {
                 let is_uninteresting = uninteresting_nodes.contains(&node.id);
                 Self::show_node_details(ui, node, graph, is_uninteresting, theme, &mut response);
@@ -37,17 +36,13 @@ impl NodePanel {
                 Self::show_empty_state(ui, theme);
             }
         } else {
-            // Multiple nodes - show as accordion
-            ui.heading(format!("{} Nodes Selected", node_ids.len()));
-            ui.separator();
-
-            // Add bulk action for marking all as uninteresting
-            ui.horizontal(|ui| {
-                if ui.button("Mark All as Background").clicked() {
+            ui.horizontal_wrapped(|ui| {
+                ui.heading(format!("{} selected", node_ids.len()));
+                if ui.button("Mark as Background").clicked() {
                     response.toggle_uninteresting = Some(node_ids.to_vec());
                 }
             });
-            ui.separator();
+            ui.add_space(6.0);
 
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for node_id in node_ids {
@@ -64,6 +59,7 @@ impl NodePanel {
                                 &mut response,
                             );
                         });
+                        ui.add_space(4.0);
                     }
                 }
             });
@@ -81,249 +77,337 @@ impl NodePanel {
         theme: &Theme,
         response: &mut NodePanelResponse,
     ) {
-        // Header
-        ui.heading(node.display_name());
+        let explanation = explain_node(node, graph);
+        let meter_peak = graph
+            .meters
+            .get(&node.id)
+            .map(|meter| meter.max_peak())
+            .unwrap_or(0.0);
+        let has_signal = meter_peak > 0.02;
+        let volume_failed = graph.volume_control_failed.get(&node.id).cloned();
 
-        // Toggle uninteresting button
-        ui.horizontal(|ui| {
-            let button_text = if is_uninteresting {
-                "Bring Into Focus"
-            } else {
-                "Mark as Background"
-            };
-            let hover_text = if is_uninteresting {
-                "Return this node to the main patch view"
-            } else {
-                "Keep this node in the background so the main patch stays readable"
-            };
-            if ui.button(button_text).on_hover_text(hover_text).clicked() {
-                response.toggle_uninteresting = Some(vec![node.id]);
-            }
-        });
-
-        ui.separator();
-
-        // Node explanation section (expanded by default)
-        egui::CollapsingHeader::new("What is this?")
-            .default_open(true)
+        egui::Frame::group(ui.style())
+            .inner_margin(egui::Margin::same(10))
             .show(ui, |ui| {
-                let explanation = explain_node(node, graph);
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(&explanation)
-                            .size(12.0)
-                            .color(ui.visuals().text_color()),
-                    )
-                    .wrap(),
-                );
-            });
+                ui.heading(node.display_name());
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    let active_color = if node.is_active {
+                        egui::Color32::from_rgb(100, 220, 140)
+                    } else {
+                        ui.visuals().weak_text_color()
+                    };
+                    ui.colored_label(active_color, if node.is_active { "Active" } else { "Idle" });
 
-        // Metadata section
-        ui.collapsing("Metadata", |ui| {
-            egui::Grid::new("node_metadata")
-                .num_columns(2)
-                .show(ui, |ui| {
-                    ui.label("ID:");
-                    ui.label(format!("{}", node.id));
-                    ui.end_row();
-
-                    ui.label("Name:");
-                    ui.add(egui::Label::new(&node.name).wrap());
-                    ui.end_row();
-
-                    if let Some(ref nick) = node.nick {
-                        ui.label("Nick:");
-                        ui.add(egui::Label::new(nick).wrap());
-                        ui.end_row();
+                    if has_signal {
+                        ui.colored_label(egui::Color32::from_rgb(120, 200, 255), "Signal present");
                     }
 
-                    if let Some(ref desc) = node.description {
-                        ui.label("Description:");
-                        ui.add(egui::Label::new(desc).wrap());
-                        ui.end_row();
+                    if is_uninteresting {
+                        ui.colored_label(ui.visuals().weak_text_color(), "Background node");
                     }
 
-                    if let Some(ref app_name) = node.application_name {
-                        ui.label("Application:");
-                        ui.add(egui::Label::new(app_name).wrap());
-                        ui.end_row();
+                    if volume_failed.is_some() {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(255, 200, 100),
+                            "Volume unavailable",
+                        );
                     }
 
-                    if let Some(ref media_class) = node.media_class {
-                        ui.label("Media Class:");
+                    if let Some(media_class) = &node.media_class {
                         ui.label(media_class.display_name());
-                        ui.end_row();
+                    }
+                });
+
+                ui.add_space(6.0);
+                ui.label(explanation);
+
+                ui.add_space(8.0);
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("Rename…").clicked() {
+                        response.rename_node = Some(node.id);
                     }
 
-                    if let Some(client_id) = node.client_id {
-                        ui.label("Client ID:");
-                        ui.label(format!("{}", client_id));
-                        ui.end_row();
+                    let button_text = if is_uninteresting {
+                        "Bring Into Focus"
+                    } else {
+                        "Mark as Background"
+                    };
+                    if ui.button(button_text).clicked() {
+                        response.toggle_uninteresting = Some(vec![node.id]);
                     }
-
-                    ui.label("Active:");
-                    ui.label(if node.is_active { "Yes" } else { "No" });
-                    ui.end_row();
-                });
-        });
-
-        // Format section
-        if let Some(ref format) = node.format {
-            egui::CollapsingHeader::new("Audio Format").show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("");
-                    help_button(ui, "audio", "audio_basics");
-                });
-                egui::Grid::new("node_format").show(ui, |ui| {
-                    ui.label("Sample Rate:");
-                    ui.label(format!("{} Hz", format.sample_rate));
-                    ui.end_row();
-
-                    ui.label("Channels:");
-                    ui.label(format!("{}", format.channels));
-                    ui.end_row();
-
-                    ui.label("Format:");
-                    ui.label(&format.format);
-                    ui.end_row();
                 });
             });
-        }
 
-        // Volume control
         if let Some(volume) = graph.volumes.get(&node.id) {
-            ui.separator();
-            ui.horizontal(|ui| {
-                ui.heading("Volume");
-                help_button(ui, "audio", "volume_control");
-            });
-
-            // Show warning if volume control failed for this node
-            if let Some(error_msg) = graph.volume_control_failed.get(&node.id) {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(egui_phosphor::regular::WARNING)
-                            .color(egui::Color32::YELLOW),
-                    );
-                    ui.label(
-                        egui::RichText::new(error_msg)
-                            .color(egui::Color32::YELLOW)
-                            .small(),
-                    );
-                });
-            }
-
-            if Self::show_volume_control(ui, node.id, volume, response) {
-                // Volume was changed
-            }
-        }
-
-        // Ports section
-        ui.separator();
-        let ports = graph.ports_for_node(&node.id);
-
-        let mut input_ports: Vec<_> = ports
-            .iter()
-            .filter(|p| p.direction == PortDirection::Input)
-            .collect();
-        input_ports.sort_by(|a, b| a.name.cmp(&b.name));
-        let mut output_ports: Vec<_> = ports
-            .iter()
-            .filter(|p| p.direction == PortDirection::Output)
-            .collect();
-        output_ports.sort_by(|a, b| a.name.cmp(&b.name));
-
-        if !input_ports.is_empty() {
-            ui.collapsing(format!("Input Ports ({})", input_ports.len()), |ui| {
-                for port in input_ports {
-                    Self::show_port(ui, port, theme);
-                }
-            });
-        }
-
-        if !output_ports.is_empty() {
-            ui.collapsing(format!("Output Ports ({})", output_ports.len()), |ui| {
-                for port in output_ports {
-                    Self::show_port(ui, port, theme);
-                }
-            });
-        }
-
-        // Links section
-        let links = graph.links_for_node(&node.id);
-        if !links.is_empty() {
-            ui.separator();
-            egui::CollapsingHeader::new(format!("Connections ({})", links.len()))
-                .default_open(true)
+            ui.add_space(8.0);
+            egui::Frame::group(ui.style())
+                .inner_margin(egui::Margin::same(10))
                 .show(ui, |ui| {
-                    let modifiers = ui.input(|i| i.modifiers);
+                    ui.heading("Volume");
 
-                    for link in links {
-                        let direction = if link.output_node == node.id {
-                            egui_phosphor::regular::ARROW_RIGHT
-                        } else {
-                            egui_phosphor::regular::ARROW_LEFT
-                        };
-                        let other_node_id = if link.output_node == node.id {
-                            link.input_node
-                        } else {
-                            link.output_node
-                        };
-
-                        let other_name = graph
-                            .get_node(&other_node_id)
-                            .map(|n| n.display_name().to_string())
-                            .unwrap_or_else(|| "Unknown".to_string());
-
-                        // Connection info and action buttons on same line
-                        ui.horizontal(|ui| {
-                            // Toggle button
-                            let toggle_text = if link.is_active {
-                                egui_phosphor::regular::PAUSE
-                            } else {
-                                egui_phosphor::regular::PLAY
-                            };
-                            let toggle_hint = if link.is_active { "Disable" } else { "Enable" };
-                            if ui
-                                .small_button(toggle_text)
-                                .on_hover_text(toggle_hint)
-                                .clicked()
-                            {
-                                response.toggle_link = Some((link.id, !link.is_active));
-                            }
-
-                            // Delete button
-                            if ui
-                                .small_button(egui_phosphor::regular::X)
-                                .on_hover_text("Remove connection")
-                                .clicked()
-                            {
-                                response.remove_link = Some(link.id);
-                            }
-
-                            // Direction indicator
-                            ui.label(direction);
-
-                            // Node name - clickable to select
-                            let name_response = ui.add(
-                                egui::Label::new(egui::RichText::new(&other_name).underline())
-                                    .sense(egui::Sense::click()),
+                    if let Some(error_msg) = volume_failed.as_deref() {
+                        ui.add_space(4.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(
+                                egui::RichText::new(egui_phosphor::regular::WARNING)
+                                    .color(egui::Color32::YELLOW),
                             );
-                            if name_response.clicked() {
-                                response.toggle_node_selection =
-                                    Some((other_node_id, modifiers.shift));
-                            }
-                            name_response
-                                .on_hover_text("Click to select, Shift+click to add to selection");
-
-                            // Status indicator
-                            if !link.is_active {
-                                ui.colored_label(egui::Color32::GRAY, "(disabled)");
-                            }
+                            ui.label(
+                                egui::RichText::new(error_msg)
+                                    .color(egui::Color32::YELLOW)
+                                    .small(),
+                            );
                         });
-                        ui.separator();
                     }
+
+                    let _ = Self::show_volume_control(ui, node.id, volume, response);
                 });
+        }
+
+        ui.add_space(8.0);
+        Self::show_relationships(ui, node, graph, response);
+
+        ui.add_space(8.0);
+        egui::CollapsingHeader::new("Details")
+            .default_open(false)
+            .show(ui, |ui| {
+                egui::Grid::new(format!("node_metadata_{}", node.id.raw()))
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label("ID:");
+                        ui.label(format!("{}", node.id));
+                        ui.end_row();
+
+                        ui.label("Name:");
+                        ui.add(egui::Label::new(&node.name).wrap());
+                        ui.end_row();
+
+                        if let Some(ref nick) = node.nick {
+                            ui.label("Nick:");
+                            ui.add(egui::Label::new(nick).wrap());
+                            ui.end_row();
+                        }
+
+                        if let Some(ref desc) = node.description {
+                            ui.label("Description:");
+                            ui.add(egui::Label::new(desc).wrap());
+                            ui.end_row();
+                        }
+
+                        if let Some(ref app_name) = node.application_name {
+                            ui.label("Application:");
+                            ui.add(egui::Label::new(app_name).wrap());
+                            ui.end_row();
+                        }
+
+                        if let Some(ref media_class) = node.media_class {
+                            ui.label("Media Class:");
+                            ui.label(media_class.display_name());
+                            ui.end_row();
+                        }
+
+                        if let Some(client_id) = node.client_id {
+                            ui.label("Client ID:");
+                            ui.label(format!("{}", client_id));
+                            ui.end_row();
+                        }
+                    });
+
+                if let Some(ref format) = node.format {
+                    ui.add_space(8.0);
+                    egui::CollapsingHeader::new("Audio Format")
+                        .default_open(false)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("");
+                                help_button(ui, "audio", "audio_basics");
+                            });
+                            egui::Grid::new(format!("node_format_{}", node.id.raw())).show(
+                                ui,
+                                |ui| {
+                                    ui.label("Sample Rate:");
+                                    ui.label(format!("{} Hz", format.sample_rate));
+                                    ui.end_row();
+
+                                    ui.label("Channels:");
+                                    ui.label(format!("{}", format.channels));
+                                    ui.end_row();
+
+                                    ui.label("Format:");
+                                    ui.label(&format.format);
+                                    ui.end_row();
+                                },
+                            );
+                        });
+                }
+
+                let ports = graph.ports_for_node(&node.id);
+                let mut input_ports: Vec<_> = ports
+                    .iter()
+                    .filter(|p| p.direction == PortDirection::Input)
+                    .collect();
+                input_ports.sort_by(|a, b| a.name.cmp(&b.name));
+                let mut output_ports: Vec<_> = ports
+                    .iter()
+                    .filter(|p| p.direction == PortDirection::Output)
+                    .collect();
+                output_ports.sort_by(|a, b| a.name.cmp(&b.name));
+
+                if !input_ports.is_empty() {
+                    ui.add_space(8.0);
+                    ui.collapsing(format!("Input Ports ({})", input_ports.len()), |ui| {
+                        for port in input_ports {
+                            Self::show_port(ui, port, theme);
+                        }
+                    });
+                }
+
+                if !output_ports.is_empty() {
+                    ui.add_space(8.0);
+                    ui.collapsing(format!("Output Ports ({})", output_ports.len()), |ui| {
+                        for port in output_ports {
+                            Self::show_port(ui, port, theme);
+                        }
+                    });
+                }
+            });
+    }
+
+    fn show_relationships(
+        ui: &mut Ui,
+        node: &Node,
+        graph: &GraphState,
+        response: &mut NodePanelResponse,
+    ) {
+        let mut receiving: Vec<_> = graph
+            .links_for_node(&node.id)
+            .into_iter()
+            .filter(|link| link.input_node == node.id)
+            .collect();
+        receiving.sort_by_key(|link| link.id.raw());
+
+        let mut sending: Vec<_> = graph
+            .links_for_node(&node.id)
+            .into_iter()
+            .filter(|link| link.output_node == node.id)
+            .collect();
+        sending.sort_by_key(|link| link.id.raw());
+
+        egui::Frame::group(ui.style())
+            .inner_margin(egui::Margin::same(10))
+            .show(ui, |ui| {
+                ui.heading("Routing");
+                ui.add_space(8.0);
+
+                ui.columns(2, |columns| {
+                    Self::show_relationship_column(
+                        &mut columns[0],
+                        "Receiving from",
+                        "No inputs",
+                        node.id,
+                        &receiving,
+                        graph,
+                        response,
+                    );
+                    Self::show_relationship_column(
+                        &mut columns[1],
+                        "Sending to",
+                        "No outputs",
+                        node.id,
+                        &sending,
+                        graph,
+                        response,
+                    );
+                });
+            });
+    }
+
+    fn show_relationship_column(
+        ui: &mut Ui,
+        title: &str,
+        empty_label: &str,
+        node_id: NodeId,
+        links: &[&Link],
+        graph: &GraphState,
+        response: &mut NodePanelResponse,
+    ) {
+        ui.strong(title);
+        ui.add_space(4.0);
+
+        if links.is_empty() {
+            ui.weak(empty_label);
+            return;
+        }
+
+        for link in links {
+            let (other_node_id, source_port, dest_port) = if link.output_node == node_id {
+                (link.input_node, link.output_port, link.input_port)
+            } else {
+                (link.output_node, link.output_port, link.input_port)
+            };
+
+            let other_name = graph
+                .get_node(&other_node_id)
+                .map(|n| n.display_name().to_string())
+                .unwrap_or_else(|| "Unknown".to_string());
+            let source_port_name = graph
+                .get_port(&source_port)
+                .map(|p| p.display_name().to_string())
+                .unwrap_or_else(|| "Unknown".to_string());
+            let dest_port_name = graph
+                .get_port(&dest_port)
+                .map(|p| p.display_name().to_string())
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            egui::Frame::NONE
+                .fill(ui.visuals().faint_bg_color)
+                .corner_radius(6)
+                .inner_margin(egui::Margin::same(8))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        let toggle_text = if link.is_active {
+                            egui_phosphor::regular::PAUSE
+                        } else {
+                            egui_phosphor::regular::PLAY
+                        };
+                        let toggle_hint = if link.is_active { "Disable" } else { "Enable" };
+                        if ui
+                            .small_button(toggle_text)
+                            .on_hover_text(toggle_hint)
+                            .clicked()
+                        {
+                            response.toggle_link = Some((link.id, !link.is_active));
+                        }
+
+                        if ui
+                            .small_button(egui_phosphor::regular::X)
+                            .on_hover_text("Remove connection")
+                            .clicked()
+                        {
+                            response.remove_link = Some(link.id);
+                        }
+
+                        let name_response = ui.add(
+                            egui::Label::new(egui::RichText::new(&other_name).underline())
+                                .sense(egui::Sense::click()),
+                        );
+                        if name_response.clicked() {
+                            let modifiers = ui.input(|i| i.modifiers);
+                            response.toggle_node_selection = Some((other_node_id, modifiers.shift));
+                        }
+                        name_response.on_hover_text(
+                            "Click to select, Shift+click to extend",
+                        );
+
+                        let status = if link.is_active { "live" } else { "paused" };
+                        ui.weak(format!(
+                            "{} → {} ({})",
+                            source_port_name, dest_port_name, status
+                        ));
+                    });
+                });
+            ui.add_space(4.0);
         }
     }
 
@@ -336,14 +420,11 @@ impl NodePanel {
     ) -> bool {
         let mut changed = false;
 
-        // Get display mode from persistent state (true = dB, false = %)
         let show_db =
             ui.data_mut(|d| *d.get_persisted_mut_or(egui::Id::new("volume_display_db"), false));
 
-        // Use available_width which returns the layout width available for widgets
         let content_width = ui.available_width();
 
-        // Mute button
         ui.add_space(4.0);
         let mute_text = if volume.muted { "MUTED" } else { "Active" };
         let mute_color = if volume.muted {
@@ -361,15 +442,12 @@ impl NodePanel {
 
         ui.add_space(8.0);
 
-        // Master volume
         let mut master = volume.master;
 
-        // Row: "Master" label + value input
         ui.horizontal(|ui| {
             ui.strong("Master:");
             ui.add_space(8.0);
             if show_db {
-                // dB display: -inf to +6 dB
                 let mut db_val = crate::domain::audio::linear_to_db(master);
                 if db_val < -60.0 {
                     db_val = -60.0;
@@ -386,7 +464,6 @@ impl NodePanel {
                     changed = true;
                 }
             } else {
-                // Percent display: 0% to 150%
                 let mut pct = master * 100.0;
                 let drag = egui::DragValue::new(&mut pct)
                     .range(0.0..=150.0)
@@ -402,7 +479,6 @@ impl NodePanel {
             }
         });
 
-        // Slider - set slider_width to control the rail, then add_sized for the container
         ui.add_space(4.0);
         ui.spacing_mut().slider_width = content_width;
         let slider = egui::Slider::new(&mut master, 0.0..=1.5)
@@ -415,8 +491,6 @@ impl NodePanel {
         }
 
         ui.add_space(4.0);
-
-        // Display mode toggle
         ui.horizontal(|ui| {
             let mut db_mode = show_db;
             if ui.checkbox(&mut db_mode, "Show dB").changed() {
@@ -426,7 +500,6 @@ impl NodePanel {
             }
         });
 
-        // Per-channel controls (collapsed)
         if volume.channels.len() > 1 {
             ui.add_space(4.0);
             egui::CollapsingHeader::new(format!("Channels ({})", volume.channels.len())).show(
@@ -434,12 +507,9 @@ impl NodePanel {
                 |ui| {
                     help_button(ui, "audio", "channels_explained");
 
-                    // Get channel content width from available layout width
                     let ch_content_width = ui.available_width();
 
                     for (i, &ch_vol) in volume.channels.iter().enumerate() {
-                        // Use the new master value if master just changed, otherwise use channel value
-                        // This prevents 1-frame lag where channels show old values while master shows new
                         let mut ch = if master_changed_this_frame {
                             master
                         } else {
@@ -481,7 +551,6 @@ impl NodePanel {
                             }
                         });
 
-                        // Channel slider - set slider_width to control the rail
                         ui.spacing_mut().slider_width = ch_content_width;
                         let slider = egui::Slider::new(&mut ch, 0.0..=1.5)
                             .show_value(false)
@@ -501,7 +570,6 @@ impl NodePanel {
 
     /// Shows a port entry with expandable details.
     fn show_port(ui: &mut Ui, port: &Port, theme: &Theme) {
-        // Port indicator color
         let color = theme.port_color(
             port.direction,
             true,
@@ -511,7 +579,6 @@ impl NodePanel {
             port.is_monitor,
         );
 
-        // Build a summary line with flags
         let mut summary = port.display_name().to_string();
         if port.is_monitor {
             summary.push_str(" (monitor)");
@@ -524,7 +591,6 @@ impl NodePanel {
             let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
             ui.painter().circle_filled(rect.center(), 4.0, color);
 
-            // Collapsible port details
             egui::CollapsingHeader::new(&summary)
                 .id_salt(port.id.raw())
                 .default_open(false)
@@ -572,15 +638,10 @@ impl NodePanel {
     /// Shows the empty state when no node is selected.
     fn show_empty_state(ui: &mut Ui, _theme: &Theme) {
         ui.vertical_centered(|ui| {
-            ui.add_space(20.0);
-            ui.label("Nothing selected");
-            ui.add_space(10.0);
-            ui.label("Select a node to inspect details, or use the left navigation to focus, automate, or recall a setup.");
-            ui.add_space(20.0);
-            ui.horizontal(|ui| {
-                ui.label("Need a quick orientation?");
-                help_button(ui, "general", "nodes_and_ports");
-            });
+            ui.add_space(40.0);
+            ui.label(RichText::new(egui_phosphor::regular::CURSOR_CLICK).size(32.0).weak());
+            ui.add_space(8.0);
+            ui.weak("Select a node");
         });
     }
 }
@@ -611,6 +672,8 @@ pub struct NodePanelResponse {
     pub toggle_uninteresting: Option<Vec<NodeId>>,
     /// Toggle a node's selection state (with shift = extend, without = replace)
     pub toggle_node_selection: Option<(NodeId, bool)>,
+    /// Open the rename dialog for a node
+    pub rename_node: Option<NodeId>,
 }
 
 #[cfg(test)]
@@ -622,5 +685,6 @@ mod tests {
         let response = NodePanelResponse::default();
         assert!(response.toggle_mute.is_none());
         assert!(response.volume_changed.is_none());
+        assert!(response.rename_node.is_none());
     }
 }

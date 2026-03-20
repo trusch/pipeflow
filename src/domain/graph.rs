@@ -44,6 +44,7 @@ impl NodeLayer {
     }
 
     /// Returns a description of what this layer represents.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn description(&self) -> &'static str {
         match self {
             Self::Hardware => "Physical device nodes from kernel (ALSA, etc.)",

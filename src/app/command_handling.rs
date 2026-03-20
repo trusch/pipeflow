@@ -15,6 +15,23 @@ use crate::util::spatial::Position;
 
 use super::PipeflowApp;
 
+fn rule_match_pattern(node: &Node, port_name: &str) -> MatchPattern {
+    let use_app_name_as_primary = node
+        .application_name
+        .as_deref()
+        .is_some_and(|name| !name.is_empty());
+
+    MatchPattern::exact(
+        node.application_name.as_deref(),
+        if use_app_name_as_primary {
+            ""
+        } else {
+            &node.name
+        },
+        port_name,
+    )
+}
+
 /// Creates a stable NodeIdentifier for any node, including satellites/metering nodes.
 ///
 /// For regular nodes: uses the node's own properties.
@@ -601,16 +618,8 @@ impl PipeflowApp {
                     None => continue,
                 };
 
-                let output_pattern = MatchPattern::exact(
-                    out_node.application_name.as_deref(),
-                    &out_node.name,
-                    &out_port.name,
-                );
-                let input_pattern = MatchPattern::exact(
-                    in_node.application_name.as_deref(),
-                    &in_node.name,
-                    &in_port.name,
-                );
+                let output_pattern = rule_match_pattern(out_node, &out_port.name);
+                let input_pattern = rule_match_pattern(in_node, &in_port.name);
                 specs.push(ConnectionSpec::new(output_pattern, input_pattern));
             }
 
@@ -641,5 +650,34 @@ impl PipeflowApp {
 
         // Mark that we need to save layout
         self.components.needs_layout_save = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rule_match_pattern;
+    use crate::domain::graph::{Node, NodeLayer};
+    use crate::util::id::NodeId;
+
+    #[test]
+    fn rule_match_pattern_uses_app_name_for_app_owned_nodes() {
+        let node = Node {
+            id: NodeId::new(1),
+            name: "vibelang-1234".to_string(),
+            client_id: None,
+            media_class: None,
+            application_name: Some("Vibelang".to_string()),
+            description: Some("Vibelang".to_string()),
+            nick: None,
+            format: None,
+            port_ids: Vec::new(),
+            is_active: true,
+            layer: NodeLayer::Session,
+        };
+
+        let pattern = rule_match_pattern(&node, "output_FL");
+        assert_eq!(pattern.app_name, "Vibelang");
+        assert!(pattern.node_name.is_empty());
+        assert_eq!(pattern.port_name, "output_FL");
     }
 }

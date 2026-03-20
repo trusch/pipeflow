@@ -9,4 +9,5 @@ pub mod commands;
 pub mod config;
 pub mod errors;
 pub mod history;
+#[path = "state/mod.rs"]
 pub mod state;

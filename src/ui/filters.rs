@@ -4,7 +4,6 @@
 
 use crate::domain::filters::{FilterPredicate, FilterSet};
 use crate::domain::graph::{MediaClass, PortDirection};
-use crate::ui::help_texts::help_button;
 use crate::ui::theme::Theme;
 use egui::Ui;
 
@@ -18,9 +17,13 @@ impl FilterPanel {
 
         // Search box
         ui.horizontal(|ui| {
-            ui.label("Focus:");
             let mut search = filters.search.clone().unwrap_or_default();
-            if ui.text_edit_singleline(&mut search).changed() {
+            let te = ui.add(
+                egui::TextEdit::singleline(&mut search)
+                    .hint_text("Filter...")
+                    .desired_width(ui.available_width()),
+            );
+            if te.changed() {
                 filters.set_search(if search.is_empty() {
                     None
                 } else {
@@ -28,17 +31,11 @@ impl FilterPanel {
                 });
                 response.changed = true;
             }
-            help_button(ui, "filters", "search_filter");
         });
 
         ui.separator();
 
         // Quick filters
-        ui.horizontal(|ui| {
-            ui.label("Quick focus:");
-            help_button(ui, "filters", "media_type_filters");
-        });
-
         ui.horizontal_wrapped(|ui| {
             response.changed |= Self::toggle_chip(ui, filters, "Audio", FilterPredicate::AudioOnly);
             response.changed |= Self::toggle_chip(ui, filters, "Video", FilterPredicate::VideoOnly);
@@ -48,11 +45,6 @@ impl FilterPanel {
         });
 
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.label("Direction:");
-            help_button(ui, "filters", "direction_filters");
-        });
-
         ui.horizontal_wrapped(|ui| {
             response.changed |= Self::toggle_chip(
                 ui,

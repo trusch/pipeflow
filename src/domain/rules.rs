@@ -22,6 +22,7 @@ pub enum RuleTrigger {
 
 impl RuleTrigger {
     /// Returns a human-readable display name for the trigger.
+    #[allow(dead_code)]
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::OnSourceAppear => "Source Appears",
@@ -32,6 +33,7 @@ impl RuleTrigger {
     }
 
     /// Returns all available trigger options.
+    #[allow(dead_code)]
     pub fn all() -> &'static [RuleTrigger] {
         &[
             Self::OnSourceAppear,
@@ -80,10 +82,36 @@ impl MatchPattern {
 
     /// Tests if this pattern matches the given identifiers.
     /// Uses glob-style matching (* = any characters, ? = single char).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn matches(&self, app_name: Option<&str>, node_name: &str, port_name: &str) -> bool {
         Self::glob_match(&self.app_name, app_name.unwrap_or(""))
             && Self::glob_match(&self.node_name, node_name)
             && Self::glob_match(&self.port_name, port_name)
+    }
+
+    /// Tests if this pattern matches at runtime, with a fallback for app-owned nodes.
+    ///
+    /// Some applications expose PipeWire node names that change across restarts
+    /// while keeping the application name and port names stable. If a pattern
+    /// specifies an exact node name plus an application name, and the exact node
+    /// name no longer matches, we fall back to matching on application + port.
+    pub fn matches_runtime(
+        &self,
+        app_name: Option<&str>,
+        node_name: &str,
+        port_name: &str,
+    ) -> bool {
+        if !Self::glob_match(&self.app_name, app_name.unwrap_or(""))
+            || !Self::glob_match(&self.port_name, port_name)
+        {
+            return false;
+        }
+
+        if self.node_name.is_empty() || Self::glob_match(&self.node_name, node_name) {
+            return true;
+        }
+
+        !self.app_name.is_empty() && !Self::has_wildcards(&self.node_name)
     }
 
     /// Simple glob matching (supports * and ?).
@@ -92,6 +120,10 @@ impl MatchPattern {
             return true; // Empty pattern matches anything
         }
         glob_match::glob_match(pattern, text)
+    }
+
+    fn has_wildcards(pattern: &str) -> bool {
+        pattern.contains('*') || pattern.contains('?')
     }
 }
 
@@ -316,6 +348,23 @@ mod tests {
         // Empty pattern matches anything
         assert!(pattern.matches(Some("Any"), "anything", "whatever"));
         assert!(pattern.matches(None, "node", "port"));
+    }
+
+    #[test]
+    fn test_match_pattern_runtime_falls_back_to_app_and_port_for_exact_node_names() {
+        let pattern = MatchPattern::exact(Some("Vibelang"), "vibelang-1234", "output_FL");
+
+        assert!(pattern.matches_runtime(Some("Vibelang"), "vibelang-5678", "output_FL"));
+        assert!(!pattern.matches_runtime(Some("Other App"), "vibelang-5678", "output_FL"));
+        assert!(!pattern.matches_runtime(Some("Vibelang"), "vibelang-5678", "output_FR"));
+    }
+
+    #[test]
+    fn test_match_pattern_runtime_does_not_ignore_wildcard_node_filters() {
+        let pattern = MatchPattern::new("Vibelang", "vibelang-*", "output_FL");
+
+        assert!(pattern.matches_runtime(Some("Vibelang"), "vibelang-main", "output_FL"));
+        assert!(!pattern.matches_runtime(Some("Vibelang"), "other-node", "output_FL"));
     }
 
     #[test]

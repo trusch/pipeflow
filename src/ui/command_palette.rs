@@ -201,7 +201,7 @@ impl CommandPalette {
             .iter()
             .map(|(id, name)| CommandEntry {
                 name: format!("\u{2192} {}", name), // → prefix for visual distinction
-                description: format!("Jump to node"),
+                description: "Jump to node".to_string(),
                 shortcut: None,
                 action: CommandAction::GoToNode(*id),
             })
@@ -258,6 +258,7 @@ impl CommandPalette {
     /// Filters commands based on search text (without node entries).
     /// When search is empty, commands are sorted by usage history (most recent first).
     /// When searching, fuzzy match score is combined with history boost.
+    #[cfg_attr(not(test), allow(dead_code))]
     fn filter_commands<'a>(&self, registry: &'a CommandRegistry) -> Vec<&'a CommandEntry> {
         self.filter_commands_with_nodes(registry, &[])
     }

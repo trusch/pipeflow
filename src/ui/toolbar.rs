@@ -9,15 +9,28 @@ use crate::domain::safety::{SafetyController, SafetyMode};
 use crate::ui::theme::Theme;
 use egui::{Color32, RichText, Ui};
 
+/// Explicit session identity shown in the app chrome.
+#[derive(Debug, Clone, Default)]
+pub struct SessionPresence {
+    /// Whether the UI is controlling a remote Pipeflow instance.
+    pub is_remote: bool,
+    /// Human-readable target, e.g. `studio@rack.local`.
+    pub target_label: Option<String>,
+    /// Transport summary, e.g. `SSH tunnel via 127.0.0.1:50051`.
+    pub transport_label: Option<String>,
+}
+
 /// Toolbar component.
 pub struct Toolbar;
 
 impl Toolbar {
     /// Shows the toolbar.
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         ui: &mut Ui,
         safety: &SafetyController,
         connection: ConnectionState,
+        session_presence: &SessionPresence,
         meter_config: &MeterConfig,
         hide_background: bool,
         layer_visibility: &LayerVisibility,
@@ -29,6 +42,14 @@ impl Toolbar {
 
         ui.horizontal_wrapped(|ui| {
             Self::show_connection_status(ui, connection, theme);
+            let show_presence = session_presence
+                .target_label
+                .as_deref()
+                .is_some_and(|l| l != "This machine");
+            if show_presence {
+                ui.separator();
+                Self::show_session_presence(ui, session_presence, connection, theme);
+            }
             ui.separator();
             Self::show_safety_state(ui, safety, &mut response, theme);
             ui.separator();
@@ -77,26 +98,30 @@ impl Toolbar {
     }
 
     fn show_connection_status(ui: &mut Ui, connection: ConnectionState, theme: &Theme) {
-        let (color, icon, text) = match connection {
+        let (color, icon, text, detail) = match connection {
             ConnectionState::Connected => (
                 theme.meter.low,
                 egui_phosphor::regular::WIFI_HIGH,
                 "Connected",
+                "Pipeflow is receiving live graph updates.",
             ),
             ConnectionState::Connecting => (
                 theme.text.warning,
                 egui_phosphor::regular::SPINNER,
                 "Connecting",
+                "Waiting for the graph stream to become live.",
             ),
             ConnectionState::Disconnected => (
                 theme.text.muted,
                 egui_phosphor::regular::WIFI_SLASH,
                 "Disconnected",
+                "No live graph stream right now.",
             ),
             ConnectionState::Error => (
                 theme.text.error,
                 egui_phosphor::regular::WARNING,
-                "Connection error",
+                "Error",
+                "Pipeflow hit a transport or server error.",
             ),
         };
 
@@ -108,13 +133,82 @@ impl Toolbar {
                 24,
             ))
             .corner_radius(8)
-            .inner_margin(egui::Margin::symmetric(10, 6))
+            .inner_margin(egui::Margin::symmetric(6, 3))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
                     ui.label(RichText::new(icon).color(color));
                     ui.label(RichText::new(text).color(color).strong());
                 });
-            });
+            })
+            .response
+            .on_hover_text(detail);
+    }
+
+    fn show_session_presence(
+        ui: &mut Ui,
+        session_presence: &SessionPresence,
+        connection: ConnectionState,
+        _theme: &Theme,
+    ) {
+        let (accent, icon, detail) = match connection {
+            ConnectionState::Connected => (
+                Color32::from_rgb(120, 220, 150),
+                egui_phosphor::regular::DESKTOP,
+                "You are controlling a remote machine right now.",
+            ),
+            ConnectionState::Connecting => (
+                Color32::from_rgb(255, 200, 110),
+                egui_phosphor::regular::SPINNER,
+                "Reaching the remote machine through the tunnel…",
+            ),
+            ConnectionState::Disconnected => (
+                Color32::from_rgb(180, 180, 190),
+                egui_phosphor::regular::DESKTOP,
+                "The remote machine is selected, but the live session is offline.",
+            ),
+            ConnectionState::Error => (
+                Color32::from_rgb(255, 130, 130),
+                egui_phosphor::regular::WARNING_OCTAGON,
+                "The remote session hit an error. Check the tunnel or remote server.",
+            ),
+        };
+
+        let title = session_presence
+            .target_label
+            .as_deref()
+            .unwrap_or("Remote machine");
+        let transport = session_presence
+            .transport_label
+            .as_deref()
+            .unwrap_or("SSH tunnel");
+
+        let chip_label = if session_presence.is_remote {
+            format!("Remote: {}", title)
+        } else {
+            title.to_string()
+        };
+
+        let tooltip = format!("{}\nTransport: {}", detail, transport);
+
+        egui::Frame::NONE
+            .fill(Color32::from_rgba_unmultiplied(
+                accent.r(),
+                accent.g(),
+                accent.b(),
+                22,
+            ))
+            .corner_radius(8)
+            .inner_margin(egui::Margin::symmetric(6, 3))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.label(RichText::new(icon).color(accent));
+                    ui.label(RichText::new(chip_label).strong().color(accent));
+                });
+            })
+            .response
+            .on_hover_text(tooltip);
     }
 
     fn show_safety_state(
@@ -151,20 +245,13 @@ impl Toolbar {
                 tint.b(),
                 28,
             ))
-            .stroke(egui::Stroke::new(1.0, tint))
-            .corner_radius(10)
-            .inner_margin(egui::Margin::symmetric(10, 6))
+            .corner_radius(8)
+            .inner_margin(egui::Margin::symmetric(6, 3))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
                     ui.label(RichText::new(icon).color(tint));
-                    ui.vertical(|ui| {
-                        ui.label(
-                            RichText::new(format!("Safety: {}", label))
-                                .strong()
-                                .color(tint),
-                        );
-                        ui.label(RichText::new(summary).small().color(theme.text.secondary));
-                    });
+                    ui.label(RichText::new(label).strong().color(tint));
 
                     egui::ComboBox::from_id_salt("toolbar_safety_mode")
                         .selected_text(label)
@@ -187,7 +274,9 @@ impl Toolbar {
                             );
                         });
                 });
-            });
+            })
+            .response
+            .on_hover_text(summary);
     }
 
     fn show_primary_actions(

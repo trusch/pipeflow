@@ -40,7 +40,17 @@ fn main() {
 
     // Run based on mode
     let result = match cli.mode() {
-        RunMode::Local => run_local_gui(),
+        RunMode::Local => {
+            if !cli.standalone && probe_local_headless(cli.bind) {
+                tracing::info!(
+                    "Detected local headless instance on {}, connecting as client",
+                    cli.bind
+                );
+                run_local_client_gui(&cli)
+            } else {
+                run_local_gui()
+            }
+        }
         RunMode::Headless => run_headless(&cli),
         RunMode::Remote => run_remote(&cli),
     };
@@ -49,6 +59,59 @@ fn main() {
         tracing::error!("Fatal error: {}", e);
         std::process::exit(1);
     }
+}
+
+/// Probes the given address for a listening headless instance via TCP connect.
+fn probe_local_headless(addr: std::net::SocketAddr) -> bool {
+    use std::net::TcpStream;
+    use std::time::Duration;
+
+    TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok()
+}
+
+/// Runs the GUI as a client connected to a local headless instance.
+#[cfg(feature = "network")]
+fn run_local_client_gui(cli: &Cli) -> Result<(), String> {
+    let addr = cli.bind.to_string();
+
+    tracing::info!("Starting local client GUI, connecting to {}", addr);
+
+    let app_icon = icon::create_app_icon();
+    let title = "Pipeflow (localhost)";
+
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1280.0, 800.0])
+            .with_min_inner_size([800.0, 600.0])
+            .with_title(title)
+            .with_icon(std::sync::Arc::new(app_icon))
+            .with_app_id("pipeflow"),
+        ..Default::default()
+    };
+
+    let token = cli.token.clone();
+
+    eframe::run_native(
+        title,
+        options,
+        Box::new(move |cc| {
+            Ok(Box::new(app::PipeflowApp::new_local_client(
+                cc,
+                &addr,
+                token.clone(),
+            )))
+        }),
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[cfg(not(feature = "network"))]
+fn run_local_client_gui(_cli: &Cli) -> Result<(), String> {
+    // Without network feature, fall back to direct local mode
+    tracing::warn!("Network feature not enabled, falling back to direct local mode");
+    run_local_gui()
 }
 
 /// Runs the application in local GUI mode.

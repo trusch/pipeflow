@@ -28,6 +28,7 @@ pub enum UndoAction {
 #[derive(Debug, Clone)]
 pub struct UndoEntry {
     /// Human-readable description of the action.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub description: String,
     /// The action to execute on redo (or initial execution).
     pub forward: UndoAction,
@@ -100,6 +101,7 @@ impl UndoStack {
     }
 
     /// Description of the action that would be undone.
+    #[cfg(test)]
     pub fn undo_description(&self) -> Option<&str> {
         if self.cursor == 0 {
             return None;
@@ -108,6 +110,7 @@ impl UndoStack {
     }
 
     /// Description of the action that would be redone.
+    #[cfg(test)]
     pub fn redo_description(&self) -> Option<&str> {
         if self.cursor >= self.history.len() {
             return None;

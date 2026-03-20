@@ -114,6 +114,94 @@ impl PipeflowApp {
         }
     }
 
+    /// Creates a new application instance as a client to a local headless instance.
+    ///
+    /// Connects to a local Pipeflow headless server via gRPC, but presents
+    /// as a local (non-remote) session.
+    #[cfg(feature = "network")]
+    pub fn new_local_client(
+        cc: &eframe::CreationContext<'_>,
+        addr: &str,
+        token: Option<String>,
+    ) -> Self {
+        use crate::network::RemoteConnection;
+
+        let config = load_config();
+        Self::configure_egui(&cc.egui_ctx);
+
+        let state = create_shared_state();
+        let (needs_initial_layout, saved_zoom, saved_pan) = load_saved_layout(&state);
+
+        // Set initial safety mode from config
+        {
+            let mut state = state.write();
+            state.safety.set_mode(config.behavior.startup_safety_mode);
+        }
+
+        // Connect to local headless server
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                tracing::error!("Failed to create tokio runtime: {}", e);
+                return Self::new_disconnected(
+                    cc,
+                    config,
+                    state,
+                    needs_initial_layout,
+                    saved_zoom,
+                    saved_pan,
+                );
+            }
+        };
+
+        let remote_connection = runtime.block_on(async {
+            match RemoteConnection::connect(addr, token).await {
+                Ok(conn) => {
+                    tracing::info!("Connected to local headless pipeflow server");
+                    Some(conn)
+                }
+                Err(e) => {
+                    tracing::error!("Failed to connect to local headless server: {}", e);
+                    None
+                }
+            }
+        });
+
+        let command_handler = remote_connection
+            .as_ref()
+            .map(|conn| crate::core::commands::CommandHandler::new(conn.command_tx.clone()));
+
+        // Create meter collector (disabled - meters come from headless server)
+        let meter_config = MeterConfig {
+            enabled: false,
+            refresh_rate: 30,
+            buffer_size: 4,
+        };
+        let meter_collector = MeterCollector::new(meter_config);
+
+        let components = AppComponents::new(saved_zoom, saved_pan, config.clone());
+
+        Self {
+            state,
+            pw_connection: None,
+            remote_connection,
+            command_handler,
+            is_remote: false,
+            session_presence: SessionPresence {
+                is_remote: false,
+                target_label: Some("localhost".to_string()),
+                transport_label: Some("Connected to local headless service".to_string()),
+            },
+            meter_collector,
+            config,
+            needs_initial_layout,
+            components,
+        }
+    }
+
     /// Creates a new application instance in remote mode.
     ///
     /// Connects to a remote Pipeflow server via gRPC.
