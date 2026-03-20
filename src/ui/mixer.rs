@@ -41,6 +41,11 @@ const MIXER_DB_MARKS: &[(f32, &str)] = &[
     (0.0, "-∞"),
 ];
 
+const MIXER_STRIP_WIDTH: f32 = 168.0;
+const MIXER_STRIP_GAP: f32 = 16.0;
+const MIXER_FADER_HEIGHT: f32 = 332.0;
+const MIXER_SEPARATOR_WIDTH: f32 = 2.0;
+
 impl MixerView {
     pub fn new() -> Self {
         Self::default()
@@ -106,16 +111,26 @@ impl MixerView {
                 egui::ScrollArea::horizontal()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
+                        let strip_count = strips.len() as f32 + 1.0; // + master strip
+                        let content_width = strip_count * MIXER_STRIP_WIDTH
+                            + (strip_count - 1.0) * MIXER_STRIP_GAP
+                            + MIXER_SEPARATOR_WIDTH
+                            + MIXER_STRIP_GAP * 2.0;
+                        let leading_space = ((ui.available_width() - content_width) * 0.5).max(0.0);
+
                         ui.horizontal_top(|ui| {
-                            for strip in &strips {
-                                self.show_strip(ui, strip, theme, &mut response);
-                                ui.add_space(16.0);
+                            if leading_space > 0.0 {
+                                ui.add_space(leading_space);
                             }
 
-                            // Vertical separator before master strip
-                            let sep_height = 420.0;
+                            for strip in &strips {
+                                self.show_strip(ui, strip, theme, &mut response);
+                                ui.add_space(MIXER_STRIP_GAP);
+                            }
+
+                            let sep_height = MIXER_FADER_HEIGHT + 118.0;
                             let (sep_rect, _) = ui.allocate_exact_size(
-                                egui::vec2(2.0, sep_height),
+                                egui::vec2(MIXER_SEPARATOR_WIDTH, sep_height),
                                 egui::Sense::hover(),
                             );
                             ui.painter().rect_filled(
@@ -123,7 +138,7 @@ impl MixerView {
                                 1.0,
                                 egui::Color32::from_rgb(60, 70, 90),
                             );
-                            ui.add_space(16.0);
+                            ui.add_space(MIXER_STRIP_GAP);
 
                             self.show_master_strip(ui, &strips, group, theme, &mut response);
                         });
@@ -253,7 +268,7 @@ impl MixerView {
             .corner_radius(18)
             .inner_margin(egui::Margin::symmetric(16, 16))
             .show(ui, |ui| {
-                ui.set_width(164.0);
+                ui.set_width(MIXER_STRIP_WIDTH);
                 ui.vertical_centered(|ui| {
                     ui.label(
                         egui::RichText::new(&strip.name)
@@ -275,7 +290,7 @@ impl MixerView {
                         ui.add_space(8.0);
 
                         let mut slider_value = self.slider_value(strip.node_id, strip.volume);
-                        let slider_size = egui::vec2(46.0, 272.0);
+                        let slider_size = egui::vec2(48.0, MIXER_FADER_HEIGHT);
                         let mut style = ui.style().as_ref().clone();
                         style.spacing.slider_width = 240.0;
                         style.visuals.widgets.active.bg_fill =
@@ -378,7 +393,7 @@ impl MixerView {
     }
 
     fn draw_db_scale(&self, ui: &mut egui::Ui, theme: &Theme) {
-        let height = 272.0;
+        let height = MIXER_FADER_HEIGHT;
         let width = 30.0;
         let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
         let painter = ui.painter();
@@ -468,7 +483,7 @@ impl MixerView {
             .corner_radius(18)
             .inner_margin(egui::Margin::symmetric(20, 16))
             .show(ui, |ui| {
-                ui.set_width(190.0);
+                ui.set_width(MIXER_STRIP_WIDTH);
                 ui.vertical_centered(|ui| {
                     // Group color accent bar
                     let (bar_rect, _) = ui.allocate_exact_size(
@@ -503,7 +518,7 @@ impl MixerView {
 
                         // Master volume slider — adjusts all members proportionally.
                         let mut slider_value = self.master_slider_value(group.id, avg_volume);
-                        let slider_size = egui::vec2(46.0, 272.0);
+                        let slider_size = egui::vec2(48.0, MIXER_FADER_HEIGHT);
                         let mut style = ui.style().as_ref().clone();
                         style.spacing.slider_width = 240.0;
                         style.visuals.widgets.active.bg_fill = group_color;
