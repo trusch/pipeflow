@@ -24,6 +24,18 @@ pub struct Snapshot {
     pub connections: Vec<SnapshotConnection>,
     /// Volume state per node (keyed by stable identifier).
     pub volumes: Vec<SnapshotVolume>,
+    /// Whether this is a disposable quick save.
+    #[serde(default)]
+    pub quick_save: bool,
+    /// Whether this setup should stay near the top of the list.
+    #[serde(default)]
+    pub favorite: bool,
+    /// Whether deletion should require an explicit unprotect step first.
+    #[serde(default)]
+    pub protected: bool,
+    /// Last restore time, if this setup has been used before.
+    #[serde(default)]
+    pub last_restored_at: Option<String>,
 }
 
 /// A single port-to-port connection within a snapshot.
@@ -81,8 +93,8 @@ impl SnapshotManager {
             }
         }
 
-        // Sort by creation time
-        snapshots.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        // Newest first so Saved Setups/Scenes feel current by default.
+        snapshots.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
         Self {
             snapshots,
@@ -90,12 +102,37 @@ impl SnapshotManager {
         }
     }
 
-    /// Captures a snapshot of the current graph state.
-    ///
-    /// `resolve_identifier` is a function that converts a node to its stable identifier.
+    /// Captures a named snapshot of the current graph state.
     pub fn capture<F>(
         &mut self,
         name: String,
+        graph: &GraphState,
+        resolve_identifier: F,
+    ) -> Result<Uuid>
+    where
+        F: Fn(&crate::domain::graph::Node, &GraphState) -> NodeIdentifier,
+    {
+        self.capture_with_options(name, false, graph, resolve_identifier)
+    }
+
+    /// Captures a disposable quick save of the current graph state.
+    pub fn capture_quick_save<F>(
+        &mut self,
+        graph: &GraphState,
+        resolve_identifier: F,
+    ) -> Result<Uuid>
+    where
+        F: Fn(&crate::domain::graph::Node, &GraphState) -> NodeIdentifier,
+    {
+        let now = chrono_now();
+        let name = format!("Quick Save {}", display_timestamp(&now));
+        self.capture_with_options(name, true, graph, resolve_identifier)
+    }
+
+    fn capture_with_options<F>(
+        &mut self,
+        name: String,
+        quick_save: bool,
         graph: &GraphState,
         resolve_identifier: F,
     ) -> Result<Uuid>
@@ -147,11 +184,17 @@ impl SnapshotManager {
             created_at: chrono_now(),
             connections,
             volumes,
+            quick_save,
+            favorite: false,
+            protected: false,
+            last_restored_at: None,
         };
 
         let id = snapshot.id;
         self.save_to_disk(&snapshot)?;
         self.snapshots.push(snapshot);
+        self.snapshots
+            .sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(id)
     }
 
@@ -167,6 +210,10 @@ impl SnapshotManager {
 
     /// Deletes a snapshot by ID.
     pub fn delete(&mut self, id: Uuid) -> Result<()> {
+        if self.get(id).is_some_and(|snapshot| snapshot.protected) {
+            anyhow::bail!("This saved setup is protected. Unprotect it before deleting.");
+        }
+
         let path = self.snapshot_path(id);
         if path.exists() {
             std::fs::remove_file(&path)
@@ -182,12 +229,52 @@ impl SnapshotManager {
         if let Some(snap) = self.snapshots.iter_mut().find(|s| s.id == id) {
             snap.name = new_name;
         }
-        // Save after the mutable borrow is released
         if let Some(snap) = self.snapshots.iter().find(|s| s.id == id) {
             let snap_clone = snap.clone();
             self.save_to_disk(&snap_clone)?;
         }
         Ok(())
+    }
+
+    /// Toggles favorite state for a saved setup.
+    pub fn toggle_favorite(&mut self, id: Uuid) -> Result<bool> {
+        let mut new_value = None;
+        if let Some(snap) = self.snapshots.iter_mut().find(|s| s.id == id) {
+            snap.favorite = !snap.favorite;
+            new_value = Some(snap.favorite);
+        }
+        if let Some(snap) = self.snapshots.iter().find(|s| s.id == id) {
+            let snap_clone = snap.clone();
+            self.save_to_disk(&snap_clone)?;
+        }
+        new_value.context("Saved setup not found")
+    }
+
+    /// Toggles protection state for a saved setup.
+    pub fn toggle_protected(&mut self, id: Uuid) -> Result<bool> {
+        let mut new_value = None;
+        if let Some(snap) = self.snapshots.iter_mut().find(|s| s.id == id) {
+            snap.protected = !snap.protected;
+            new_value = Some(snap.protected);
+        }
+        if let Some(snap) = self.snapshots.iter().find(|s| s.id == id) {
+            let snap_clone = snap.clone();
+            self.save_to_disk(&snap_clone)?;
+        }
+        new_value.context("Saved setup not found")
+    }
+
+    /// Marks a saved setup as restored now.
+    pub fn mark_restored(&mut self, id: Uuid) -> Result<()> {
+        if let Some(snap) = self.snapshots.iter_mut().find(|s| s.id == id) {
+            snap.last_restored_at = Some(chrono_now());
+        }
+        if let Some(snap) = self.snapshots.iter().find(|s| s.id == id) {
+            let snap_clone = snap.clone();
+            self.save_to_disk(&snap_clone)?;
+            return Ok(());
+        }
+        anyhow::bail!("Saved setup not found")
     }
 
     // --- Internal ---
@@ -213,15 +300,22 @@ impl SnapshotManager {
     }
 }
 
+/// Formats an ISO 8601 timestamp for display (date + time, no seconds).
+pub fn display_timestamp(ts: &str) -> String {
+    if ts.len() >= 16 {
+        ts[..16].replace('T', " ")
+    } else {
+        ts.to_string()
+    }
+}
+
 /// Returns the current UTC time as an ISO 8601 string.
 fn chrono_now() -> String {
-    // Use std::time to avoid adding chrono dependency
     use std::time::SystemTime;
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
     let secs = now.as_secs();
-    // Simple ISO 8601 without external crate
     let (year, month, day, hour, min, sec) = unix_to_datetime(secs);
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
@@ -236,7 +330,6 @@ fn unix_to_datetime(secs: u64) -> (u64, u64, u64, u64, u64, u64) {
     let hour = (secs / 3600) % 24;
     let mut days = secs / 86400;
 
-    // Calculate year
     let mut year = 1970u64;
     loop {
         let days_in_year = if is_leap_year(year) { 366 } else { 365 };
@@ -247,7 +340,6 @@ fn unix_to_datetime(secs: u64) -> (u64, u64, u64, u64, u64, u64) {
         year += 1;
     }
 
-    // Calculate month and day
     let days_in_months: [u64; 12] = if is_leap_year(year) {
         [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     } else {
@@ -282,6 +374,14 @@ mod tests {
     }
 
     #[test]
+    fn test_display_timestamp() {
+        assert_eq!(
+            display_timestamp("2024-01-15T12:30:00Z"),
+            "2024-01-15 12:30"
+        );
+    }
+
+    #[test]
     fn test_unix_to_datetime_epoch() {
         let (y, m, d, h, mi, s) = unix_to_datetime(0);
         assert_eq!((y, m, d, h, mi, s), (1970, 1, 1, 0, 0, 0));
@@ -289,7 +389,6 @@ mod tests {
 
     #[test]
     fn test_unix_to_datetime_known() {
-        // 2024-01-15T11:30:00Z = 1705318200
         let (y, m, d, h, mi, _s) = unix_to_datetime(1705318200);
         assert_eq!(y, 2024);
         assert_eq!(m, 1);
@@ -311,10 +410,16 @@ mod tests {
                 input_port_name: "input_FL".into(),
             }],
             volumes: vec![],
+            quick_save: false,
+            favorite: true,
+            protected: true,
+            last_restored_at: Some("2024-01-01T01:00:00Z".to_string()),
         };
         let json = serde_json::to_string(&snap).unwrap();
         let restored: Snapshot = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.name, "Test");
         assert_eq!(restored.connections.len(), 1);
+        assert!(restored.favorite);
+        assert!(restored.protected);
     }
 }

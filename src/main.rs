@@ -255,6 +255,7 @@ fn run_remote_gui(addr: &str, token: Option<String>) -> Result<(), String> {
             Ok(Box::new(app::PipeflowApp::new_remote(
                 cc,
                 &addr_owned,
+                &addr_owned,
                 token.clone(),
             )))
         }),

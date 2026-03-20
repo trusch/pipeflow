@@ -8,6 +8,7 @@ use crate::pipewire::connection::PwConnection;
 use crate::pipewire::meters::{MeterCollector, MeterConfig};
 
 use super::{AppComponents, PipeflowApp};
+use crate::ui::toolbar::SessionPresence;
 
 impl PipeflowApp {
     /// Creates a new application instance in local mode.
@@ -64,6 +65,11 @@ impl PipeflowApp {
             remote_connection: None,
             command_handler: Some(command_handler),
             is_remote: false,
+            session_presence: SessionPresence {
+                is_remote: false,
+                target_label: Some("This machine".to_string()),
+                transport_label: Some("Local PipeWire session".to_string()),
+            },
             meter_collector,
             config,
             needs_initial_layout,
@@ -107,6 +113,11 @@ impl PipeflowApp {
             remote_connection: None,
             command_handler: None,
             is_remote: false,
+            session_presence: SessionPresence {
+                is_remote: false,
+                target_label: Some("This machine".to_string()),
+                transport_label: Some("Local PipeWire session".to_string()),
+            },
             meter_collector,
             config,
             needs_initial_layout,
@@ -206,7 +217,12 @@ impl PipeflowApp {
     ///
     /// Connects to a remote Pipeflow server via gRPC.
     #[cfg(feature = "network")]
-    pub fn new_remote(cc: &eframe::CreationContext<'_>, addr: &str, token: Option<String>) -> Self {
+    pub fn new_remote(
+        cc: &eframe::CreationContext<'_>,
+        addr: &str,
+        remote_target: &str,
+        token: Option<String>,
+    ) -> Self {
         use crate::network::RemoteConnection;
 
         let config = load_config();
@@ -273,6 +289,11 @@ impl PipeflowApp {
             remote_connection,
             command_handler,
             is_remote: true,
+            session_presence: SessionPresence {
+                is_remote: true,
+                target_label: Some(remote_target.to_string()),
+                transport_label: Some(format!("SSH tunnel via {}", addr)),
+            },
             meter_collector,
             config,
             needs_initial_layout,
