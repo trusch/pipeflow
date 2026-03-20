@@ -33,6 +33,8 @@ struct MeterStreamData {
     dirty: bool,
     /// Audio format info for parsing
     format: spa::param::audio::AudioInfoRaw,
+    /// Whether we've already logged receipt of the first real audio buffer.
+    logged_first_buffer: bool,
 }
 
 impl Default for MeterStreamData {
@@ -45,6 +47,7 @@ impl Default for MeterStreamData {
             rms: vec![0.0; 2],
             dirty: false,
             format: Default::default(),
+            logged_first_buffer: false,
         }
     }
 }
@@ -59,6 +62,7 @@ impl MeterStreamData {
             rms: vec![0.0; 2],
             dirty: false,
             format: Default::default(),
+            logged_first_buffer: false,
         }
     }
 
@@ -126,6 +130,16 @@ struct NodeMeterInfo {
     serial: String,
     /// How this node should be tapped for metering.
     target: MeterTarget,
+    /// Human-readable node name for logs.
+    node_name: String,
+    /// Application name for logs.
+    app_name: Option<String>,
+    /// Media class label for logs.
+    media_class: Option<String>,
+    /// Optional target.object reference from PipeWire metadata.
+    target_object: Option<String>,
+    /// Optional client.api value from PipeWire metadata.
+    client_api: Option<String>,
 }
 
 /// A manager for meter streams within the PipeWire thread.
@@ -175,9 +189,35 @@ impl MeterStreamManager {
         node_id: NodeId,
         serial: String,
         target: MeterTarget,
+        node_name: String,
+        app_name: Option<String>,
+        media_class: Option<String>,
+        target_object: Option<String>,
+        client_api: Option<String>,
     ) {
-        self.node_info
-            .insert(node_id, NodeMeterInfo { serial, target });
+        tracing::debug!(
+            "Registering meter target: node_id={} node_name={} app={:?} media_class={:?} serial={} target={:?} target.object={:?} client.api={:?}",
+            node_id.raw(),
+            node_name,
+            app_name,
+            media_class,
+            serial,
+            target,
+            target_object,
+            client_api
+        );
+        self.node_info.insert(
+            node_id,
+            NodeMeterInfo {
+                serial,
+                target,
+                node_name,
+                app_name,
+                media_class,
+                target_object,
+                client_api,
+            },
+        );
         if self.auto_meter_all {
             self.start_metering(core, node_id);
         }
@@ -225,10 +265,11 @@ impl MeterStreamManager {
 
         for stale_id in stale_node_ids {
             tracing::info!(
-                "Cleaning up stale meter for node {:?} (serial {} now owned by {:?})",
+                "Cleaning up stale meter for node {:?} (serial {} now owned by {:?} / {})",
                 stale_id,
                 info.serial,
-                node_id
+                node_id,
+                info.node_name
             );
             self.streams.remove(&stale_id);
         }
@@ -237,11 +278,31 @@ impl MeterStreamManager {
         match self.create_meter_stream(core, node_id, &info.serial, info.target) {
             Some(handle) => {
                 self.streams.insert(node_id, handle);
-                tracing::debug!("Started metering node {:?} ({:?})", node_id, info.target);
+                tracing::debug!(
+                    "Started metering node {:?} / {} app={:?} media_class={:?} serial={} target={:?} target.object={:?} client.api={:?}",
+                    node_id,
+                    info.node_name,
+                    info.app_name,
+                    info.media_class,
+                    info.serial,
+                    info.target,
+                    info.target_object,
+                    info.client_api
+                );
                 true
             }
             None => {
-                tracing::warn!("Failed to create meter stream for node {:?}", node_id);
+                tracing::warn!(
+                    "Failed to create meter stream for node {:?} / {} app={:?} media_class={:?} serial={} target={:?} target.object={:?} client.api={:?}",
+                    node_id,
+                    info.node_name,
+                    info.app_name,
+                    info.media_class,
+                    info.serial,
+                    info.target,
+                    info.target_object,
+                    info.client_api
+                );
                 false
             }
         }
@@ -299,7 +360,25 @@ impl MeterStreamManager {
             .collect();
 
         for node_id in stale_ids {
-            tracing::info!("Restarting stale meter stream for node {:?}", node_id);
+            if let Some(handle) = self.streams.get(&node_id) {
+                let info = self.node_info.get(&node_id);
+                tracing::info!(
+                    "Restarting stale meter stream: node_id={} node_name={} app={:?} media_class={:?} serial={} target={:?} target.object={:?} client.api={:?} has_received_data={} age_ms={} idle_ms={}",
+                    node_id.raw(),
+                    info.map(|i| i.node_name.as_str()).unwrap_or("<unknown>"),
+                    info.and_then(|i| i.app_name.as_deref()),
+                    info.and_then(|i| i.media_class.as_deref()),
+                    info.map(|i| i.serial.as_str()).unwrap_or("<unknown>"),
+                    info.map(|i| i.target),
+                    info.and_then(|i| i.target_object.as_deref()),
+                    info.and_then(|i| i.client_api.as_deref()),
+                    handle.has_received_data,
+                    handle.started_at.elapsed().as_millis(),
+                    handle.last_data_time.elapsed().as_millis(),
+                );
+            } else {
+                tracing::info!("Restarting stale meter stream for node {:?}", node_id);
+            }
             self.streams.remove(&node_id);
             self.start_metering(core, node_id);
         }
@@ -403,10 +482,11 @@ impl MeterStreamManager {
 
                 data.update_from_format();
                 tracing::debug!(
-                    "Meter stream for node {} format: rate={} channels={}",
+                    "Meter stream for node {} format negotiated: rate={} channels={} raw_format={:?}",
                     data.node_id,
                     data.format.rate(),
-                    data.format.channels()
+                    data.format.channels(),
+                    data.format.format()
                 );
             })
             .process(|stream, user_data| {
@@ -427,6 +507,22 @@ impl MeterStreamManager {
                 };
                 let channels = data.channels as usize;
                 let num_data_planes = datas.len();
+
+                if !data.logged_first_buffer {
+                    let first_chunk_size = datas
+                        .first()
+                        .map(|d| d.chunk().size() as usize)
+                        .unwrap_or(0);
+                    tracing::debug!(
+                        "Meter stream for node {} received first buffer: planes={} channels={} first_chunk_size={} rate={}",
+                        data.node_id,
+                        num_data_planes,
+                        channels,
+                        first_chunk_size,
+                        data.sample_rate
+                    );
+                    data.logged_first_buffer = true;
+                }
 
                 // Detect format: planar (one buffer per channel) vs interleaved (all channels in one buffer)
                 if num_data_planes >= channels {

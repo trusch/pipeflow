@@ -397,15 +397,32 @@ fn try_connect_and_run(
                             .get("object.serial")
                             .map(|s| s.to_string())
                             .unwrap_or_else(|| global.id.to_string());
+                        let app_name = props.get("application.name").map(|s| s.to_string());
+                        let media_class_label = props.get("media.class").map(|s| s.to_string());
+                        let target_object = props.get("target.object").map(|s| s.to_string());
+                        let client_api = props.get("client.api").map(|s| s.to_string());
 
-                        meter_manager_for_global
-                            .borrow_mut()
-                            .register_and_auto_meter(&core_for_global, node_id, target_id, target);
-                        tracing::trace!(
-                            "Registered audio node for metering: {} ({:?}, target={:?})",
+                        meter_manager_for_global.borrow_mut().register_and_auto_meter(
+                            &core_for_global,
+                            node_id,
+                            target_id,
+                            target,
+                            node_name.to_string(),
+                            app_name.clone(),
+                            media_class_label.clone(),
+                            target_object.clone(),
+                            client_api.clone(),
+                        );
+                        tracing::debug!(
+                            "Meter candidate: node_id={} node_name={} app={:?} media_class={:?} serial={} target={:?} target.object={:?} client.api={:?}",
+                            node_id.raw(),
                             node_name,
-                            media_class,
-                            target
+                            app_name,
+                            media_class_label,
+                            props.get("object.serial").unwrap_or("<none>"),
+                            target,
+                            target_object,
+                            client_api,
                         );
 
                         if let Some(registry) = registry_weak.upgrade() {
