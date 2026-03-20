@@ -44,6 +44,7 @@ const MIXER_DB_MARKS: &[(f32, &str)] = &[
 const MIXER_STRIP_WIDTH: f32 = 168.0;
 const MIXER_STRIP_GAP: f32 = 16.0;
 const MIXER_FADER_HEIGHT: f32 = 332.0;
+const MIXER_CARD_HEIGHT: f32 = 560.0;
 const MIXER_SEPARATOR_WIDTH: f32 = 2.0;
 
 impl MixerView {
@@ -108,6 +109,11 @@ impl MixerView {
                     return;
                 }
 
+                let top_space = ((ui.available_height() - MIXER_CARD_HEIGHT) * 0.35).max(0.0);
+                if top_space > 0.0 {
+                    ui.add_space(top_space);
+                }
+
                 egui::ScrollArea::horizontal()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -128,7 +134,7 @@ impl MixerView {
                                 ui.add_space(MIXER_STRIP_GAP);
                             }
 
-                            let sep_height = MIXER_FADER_HEIGHT + 118.0;
+                            let sep_height = MIXER_CARD_HEIGHT - 8.0;
                             let (sep_rect, _) = ui.allocate_exact_size(
                                 egui::vec2(MIXER_SEPARATOR_WIDTH, sep_height),
                                 egui::Sense::hover(),
@@ -269,126 +275,130 @@ impl MixerView {
             .inner_margin(egui::Margin::symmetric(16, 16))
             .show(ui, |ui| {
                 ui.set_width(MIXER_STRIP_WIDTH);
-                ui.vertical_centered(|ui| {
-                    ui.label(
-                        egui::RichText::new(&strip.name)
-                            .strong()
-                            .size(16.0)
-                            .color(theme.text.primary),
-                    );
-                    if let Some(subtitle) = &strip.subtitle {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(MIXER_STRIP_WIDTH, MIXER_CARD_HEIGHT),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
                         ui.label(
-                            egui::RichText::new(subtitle)
-                                .small()
-                                .color(theme.text.muted),
+                            egui::RichText::new(&strip.name)
+                                .strong()
+                                .size(16.0)
+                                .color(theme.text.primary),
                         );
-                    }
-                    ui.add_space(12.0);
-
-                    ui.horizontal_top(|ui| {
-                        self.draw_db_scale(ui, theme);
+                        if let Some(subtitle) = &strip.subtitle {
+                            ui.label(
+                                egui::RichText::new(subtitle)
+                                    .small()
+                                    .color(theme.text.muted),
+                            );
+                        }
                         ui.add_space(8.0);
 
-                        let mut slider_value = self.slider_value(strip.node_id, strip.volume);
-                        let slider_size = egui::vec2(48.0, MIXER_FADER_HEIGHT);
-                        let mut style = ui.style().as_ref().clone();
-                        style.spacing.slider_width = 240.0;
-                        style.visuals.widgets.active.bg_fill =
-                            egui::Color32::from_rgb(102, 162, 255);
-                        style.visuals.widgets.hovered.bg_fill =
-                            egui::Color32::from_rgb(124, 180, 255);
-                        style.visuals.widgets.inactive.bg_fill =
-                            egui::Color32::from_rgb(39, 45, 58);
-                        style.visuals.widgets.inactive.weak_bg_fill =
-                            egui::Color32::from_rgb(28, 33, 44);
-                        ui.scope(|ui| {
-                            ui.set_style(style);
-                            let slider = egui::Slider::new(&mut slider_value, 0.0..=2.0)
-                                .vertical()
-                                .show_value(false)
-                                .step_by(0.01)
-                                .trailing_fill(true)
-                                .handle_shape(egui::style::HandleShape::Rect {
-                                    aspect_ratio: 0.55,
-                                });
-                            let resp = ui.add_sized(slider_size, slider);
-                            if resp.changed() {
-                                self.sync_slider_override(
-                                    strip.node_id,
-                                    strip.volume,
-                                    slider_value,
+                        ui.horizontal_top(|ui| {
+                            self.draw_db_scale(ui, theme);
+                            ui.add_space(8.0);
+
+                            let mut slider_value = self.slider_value(strip.node_id, strip.volume);
+                            let slider_size = egui::vec2(48.0, MIXER_FADER_HEIGHT);
+                            let mut style = ui.style().as_ref().clone();
+                            style.spacing.slider_width = 240.0;
+                            style.visuals.widgets.active.bg_fill =
+                                egui::Color32::from_rgb(102, 162, 255);
+                            style.visuals.widgets.hovered.bg_fill =
+                                egui::Color32::from_rgb(124, 180, 255);
+                            style.visuals.widgets.inactive.bg_fill =
+                                egui::Color32::from_rgb(39, 45, 58);
+                            style.visuals.widgets.inactive.weak_bg_fill =
+                                egui::Color32::from_rgb(28, 33, 44);
+                            ui.scope(|ui| {
+                                ui.set_style(style);
+                                let slider = egui::Slider::new(&mut slider_value, 0.0..=2.0)
+                                    .vertical()
+                                    .show_value(false)
+                                    .step_by(0.01)
+                                    .trailing_fill(true)
+                                    .handle_shape(egui::style::HandleShape::Rect {
+                                        aspect_ratio: 0.55,
+                                    });
+                                let resp = ui.add_sized(slider_size, slider);
+                                if resp.changed() {
+                                    self.sync_slider_override(
+                                        strip.node_id,
+                                        strip.volume,
+                                        slider_value,
+                                    );
+                                    response.volume_changes.push((strip.node_id, slider_value));
+                                } else {
+                                    self.sync_slider_override(
+                                        strip.node_id,
+                                        strip.volume,
+                                        slider_value,
+                                    );
+                                }
+                                if resp.double_clicked() {
+                                    self.slider_overrides.insert(strip.node_id, 1.0);
+                                    response.volume_changes.push((strip.node_id, 1.0));
+                                }
+                                resp.on_hover_text(
+                                    "Drag to set volume. Double-click to reset to unity (0 dB).",
                                 );
-                                response.volume_changes.push((strip.node_id, slider_value));
-                            } else {
-                                self.sync_slider_override(
-                                    strip.node_id,
-                                    strip.volume,
-                                    slider_value,
-                                );
-                            }
-                            if resp.double_clicked() {
-                                self.slider_overrides.insert(strip.node_id, 1.0);
-                                response.volume_changes.push((strip.node_id, 1.0));
-                            }
-                            resp.on_hover_text(
-                                "Drag to set volume. Double-click to reset to unity (0 dB).",
-                            );
+                            });
+
+                            ui.add_space(10.0);
+                            self.draw_level_meter(ui, strip.meter, strip.muted, slider_size.y);
                         });
 
                         ui.add_space(10.0);
-                        self.draw_level_meter(ui, strip.meter, strip.muted, slider_size.y);
-                    });
-
-                    ui.add_space(10.0);
-                    ui.label(
-                        egui::RichText::new(format!("{:.0}%", strip.volume * 100.0))
-                            .monospace()
-                            .size(20.0)
-                            .strong(),
-                    );
-                    ui.label(
-                        egui::RichText::new(Self::format_db(strip.volume))
-                            .monospace()
-                            .small()
-                            .color(theme.text.muted),
-                    );
-
-                    ui.add_space(8.0);
-                    let mute_text = if strip.muted {
-                        format!("{} Muted", egui_phosphor::regular::SPEAKER_SLASH)
-                    } else {
-                        format!("{} Mute", egui_phosphor::regular::SPEAKER_HIGH)
-                    };
-                    let mute_fill = if strip.muted {
-                        egui::Color32::from_rgb(120, 46, 46)
-                    } else {
-                        egui::Color32::from_rgb(35, 42, 56)
-                    };
-                    if ui
-                        .add(
-                            egui::Button::new(mute_text)
-                                .fill(mute_fill)
-                                .corner_radius(10)
-                                .min_size(egui::vec2(112.0, 32.0)),
-                        )
-                        .clicked()
-                    {
-                        response.mute_toggles.push(strip.node_id);
-                    }
-
-                    if let Some(err) = &strip.volume_failed {
-                        ui.add_space(8.0);
                         ui.label(
-                            egui::RichText::new(format!(
-                                "{} {}",
-                                egui_phosphor::regular::WARNING,
-                                err
-                            ))
-                            .small()
-                            .color(egui::Color32::from_rgb(255, 210, 120)),
+                            egui::RichText::new(format!("{:.0}%", strip.volume * 100.0))
+                                .monospace()
+                                .size(20.0)
+                                .strong(),
                         );
-                    }
-                });
+                        ui.label(
+                            egui::RichText::new(Self::format_db(strip.volume))
+                                .monospace()
+                                .small()
+                                .color(theme.text.muted),
+                        );
+
+                        ui.add_space(8.0);
+                        let mute_text = if strip.muted {
+                            format!("{} Muted", egui_phosphor::regular::SPEAKER_SLASH)
+                        } else {
+                            format!("{} Mute", egui_phosphor::regular::SPEAKER_HIGH)
+                        };
+                        let mute_fill = if strip.muted {
+                            egui::Color32::from_rgb(120, 46, 46)
+                        } else {
+                            egui::Color32::from_rgb(35, 42, 56)
+                        };
+                        if ui
+                            .add(
+                                egui::Button::new(mute_text)
+                                    .fill(mute_fill)
+                                    .corner_radius(10)
+                                    .min_size(egui::vec2(112.0, 32.0)),
+                            )
+                            .clicked()
+                        {
+                            response.mute_toggles.push(strip.node_id);
+                        }
+
+                        if let Some(err) = &strip.volume_failed {
+                            ui.add_space(8.0);
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{} {}",
+                                    egui_phosphor::regular::WARNING,
+                                    err
+                                ))
+                                .small()
+                                .color(egui::Color32::from_rgb(255, 210, 120)),
+                            );
+                        }
+                    },
+                );
             });
     }
 
@@ -484,15 +494,10 @@ impl MixerView {
             .inner_margin(egui::Margin::symmetric(20, 16))
             .show(ui, |ui| {
                 ui.set_width(MIXER_STRIP_WIDTH);
-                ui.vertical_centered(|ui| {
-                    // Group color accent bar
-                    let (bar_rect, _) = ui.allocate_exact_size(
-                        egui::vec2(160.0, 4.0),
-                        egui::Sense::hover(),
-                    );
-                    ui.painter().rect_filled(bar_rect, 2.0, group_color);
-                    ui.add_space(6.0);
-
+                ui.allocate_ui_with_layout(
+                    egui::vec2(MIXER_STRIP_WIDTH, MIXER_CARD_HEIGHT),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
                     ui.label(
                         egui::RichText::new("MASTER")
                             .strong()
@@ -510,7 +515,7 @@ impl MixerView {
                             .small()
                             .color(theme.text.muted),
                     );
-                    ui.add_space(12.0);
+                    ui.add_space(8.0);
 
                     ui.horizontal_top(|ui| {
                         self.draw_db_scale(ui, theme);
