@@ -68,10 +68,27 @@ impl MixerView {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.horizontal_top(|ui| {
-                            for strip in strips {
+                            for strip in &strips {
                                 self.show_strip(ui, strip, theme, &mut response);
                                 ui.add_space(16.0);
                             }
+
+                            // Vertical separator before master strip
+                            let sep_height = 420.0;
+                            let (sep_rect, _) = ui.allocate_exact_size(
+                                egui::vec2(2.0, sep_height),
+                                egui::Sense::hover(),
+                            );
+                            ui.painter().rect_filled(
+                                sep_rect,
+                                1.0,
+                                egui::Color32::from_rgb(60, 70, 90),
+                            );
+                            ui.add_space(16.0);
+
+                            self.show_master_strip(
+                                ui, &strips, group, theme, &mut response,
+                            );
                         });
                     });
             });
@@ -182,7 +199,7 @@ impl MixerView {
     fn show_strip(
         &self,
         ui: &mut egui::Ui,
-        strip: MixerStrip,
+        strip: &MixerStrip,
         theme: &Theme,
         response: &mut MixerViewResponse,
     ) {
@@ -367,6 +384,181 @@ impl MixerView {
             };
             painter.rect_filled(seg_rect, 2.0, color);
         }
+    }
+
+    fn show_master_strip(
+        &self,
+        ui: &mut egui::Ui,
+        strips: &[MixerStrip],
+        group: &NodeGroup,
+        theme: &Theme,
+        response: &mut MixerViewResponse,
+    ) {
+        if strips.is_empty() {
+            return;
+        }
+
+        // Derive master state from member strips.
+        let count = strips.len() as f32;
+        let avg_volume = strips.iter().map(|s| s.volume).sum::<f32>() / count;
+        let peak_meter = strips
+            .iter()
+            .map(|s| s.meter)
+            .fold(0.0_f32, f32::max);
+        let all_muted = strips.iter().all(|s| s.muted);
+        let any_muted = strips.iter().any(|s| s.muted);
+
+        let group_color = group.color.to_color32();
+        let card_fill = egui::Color32::from_rgb(16, 20, 30);
+        let card_stroke = if all_muted {
+            egui::Color32::from_rgb(130, 60, 60)
+        } else {
+            group_color
+        };
+
+        egui::Frame::NONE
+            .fill(card_fill)
+            .stroke(egui::Stroke::new(2.0, card_stroke))
+            .corner_radius(18)
+            .inner_margin(egui::Margin::symmetric(20, 16))
+            .show(ui, |ui| {
+                ui.set_width(190.0);
+                ui.vertical_centered(|ui| {
+                    // Group color accent bar
+                    let (bar_rect, _) = ui.allocate_exact_size(
+                        egui::vec2(160.0, 4.0),
+                        egui::Sense::hover(),
+                    );
+                    ui.painter().rect_filled(bar_rect, 2.0, group_color);
+                    ui.add_space(6.0);
+
+                    ui.label(
+                        egui::RichText::new("MASTER")
+                            .strong()
+                            .size(13.0)
+                            .color(group_color),
+                    );
+                    ui.label(
+                        egui::RichText::new(&group.name)
+                            .strong()
+                            .size(17.0)
+                            .color(theme.text.primary),
+                    );
+                    ui.label(
+                        egui::RichText::new(format!("{} ch", strips.len()))
+                            .small()
+                            .color(theme.text.muted),
+                    );
+                    ui.add_space(12.0);
+
+                    ui.horizontal_top(|ui| {
+                        self.draw_db_scale(ui, theme);
+                        ui.add_space(8.0);
+
+                        // Master volume slider — adjusts all members proportionally.
+                        let mut slider_value = avg_volume;
+                        let slider_size = egui::vec2(46.0, 272.0);
+                        let mut style = ui.style().as_ref().clone();
+                        style.spacing.slider_width = 240.0;
+                        style.visuals.widgets.active.bg_fill = group_color;
+                        style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(
+                            group.color.r.saturating_add(30),
+                            group.color.g.saturating_add(30),
+                            group.color.b.saturating_add(30),
+                        );
+                        style.visuals.widgets.inactive.bg_fill =
+                            egui::Color32::from_rgb(39, 45, 58);
+                        style.visuals.widgets.inactive.weak_bg_fill =
+                            egui::Color32::from_rgb(28, 33, 44);
+                        ui.scope(|ui| {
+                            ui.set_style(style);
+                            let slider = egui::Slider::new(&mut slider_value, 0.0..=2.0)
+                                .vertical()
+                                .show_value(false)
+                                .step_by(0.01)
+                                .trailing_fill(true)
+                                .handle_shape(egui::style::HandleShape::Rect {
+                                    aspect_ratio: 0.55,
+                                });
+                            let resp = ui.add_sized(slider_size, slider);
+                            if resp.changed() {
+                                // Scale all members proportionally so their relative
+                                // balance is preserved.
+                                let old_avg = avg_volume;
+                                for strip in strips {
+                                    let new_vol = if old_avg > 0.0001 {
+                                        (strip.volume / old_avg * slider_value).clamp(0.0, 2.0)
+                                    } else {
+                                        slider_value.clamp(0.0, 2.0)
+                                    };
+                                    response.volume_changes.push((strip.node_id, new_vol));
+                                }
+                            }
+                            if resp.double_clicked() {
+                                // Reset all members to unity.
+                                for strip in strips {
+                                    response.volume_changes.push((strip.node_id, 1.0));
+                                }
+                            }
+                            resp.on_hover_text(
+                                "Master fader — scales all member volumes proportionally.\nDouble-click to reset all to unity (0 dB).",
+                            );
+                        });
+
+                        ui.add_space(10.0);
+                        self.draw_level_meter(ui, peak_meter, all_muted, slider_size.y);
+                    });
+
+                    ui.add_space(10.0);
+                    ui.label(
+                        egui::RichText::new(format!("{:.0}%", avg_volume * 100.0))
+                            .monospace()
+                            .size(20.0)
+                            .strong(),
+                    );
+                    ui.label(
+                        egui::RichText::new(Self::format_db(avg_volume))
+                            .monospace()
+                            .small()
+                            .color(theme.text.muted),
+                    );
+
+                    ui.add_space(8.0);
+
+                    // Master mute toggles all members.
+                    let mute_text = if all_muted {
+                        format!("{} All Muted", egui_phosphor::regular::SPEAKER_SLASH)
+                    } else if any_muted {
+                        format!("{} Partial", egui_phosphor::regular::SPEAKER_LOW)
+                    } else {
+                        format!("{} Mute All", egui_phosphor::regular::SPEAKER_HIGH)
+                    };
+                    let mute_fill = if all_muted {
+                        egui::Color32::from_rgb(130, 46, 46)
+                    } else if any_muted {
+                        egui::Color32::from_rgb(90, 60, 40)
+                    } else {
+                        egui::Color32::from_rgb(35, 42, 56)
+                    };
+                    if ui
+                        .add(
+                            egui::Button::new(mute_text)
+                                .fill(mute_fill)
+                                .corner_radius(10)
+                                .min_size(egui::vec2(140.0, 34.0)),
+                        )
+                        .clicked()
+                    {
+                        // If any member is unmuted, mute all; otherwise unmute all.
+                        let should_mute = !all_muted;
+                        for strip in strips {
+                            if strip.muted != should_mute {
+                                response.mute_toggles.push(strip.node_id);
+                            }
+                        }
+                    }
+                });
+            });
     }
 
     fn format_db(volume: f32) -> String {
