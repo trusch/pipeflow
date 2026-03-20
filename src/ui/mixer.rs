@@ -3,12 +3,16 @@
 //! Renders a dedicated mixer-style central view for the members of a node group.
 
 use crate::core::state::GraphState;
-use crate::domain::groups::NodeGroup;
+use crate::domain::groups::{GroupId, NodeGroup};
 use crate::ui::theme::Theme;
 use crate::util::id::NodeId;
+use std::collections::HashMap;
 
 #[derive(Debug, Default)]
-pub struct MixerView;
+pub struct MixerView {
+    slider_overrides: HashMap<NodeId, f32>,
+    master_slider_overrides: HashMap<GroupId, f32>,
+}
 
 #[derive(Debug, Default)]
 pub struct MixerViewResponse {
@@ -39,7 +43,42 @@ const MIXER_DB_MARKS: &[(f32, &str)] = &[
 
 impl MixerView {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    fn slider_value(&self, node_id: NodeId, backend_value: f32) -> f32 {
+        self.slider_overrides
+            .get(&node_id)
+            .copied()
+            .unwrap_or(backend_value)
+    }
+
+    fn sync_slider_override(&mut self, node_id: NodeId, backend_value: f32, ui_value: f32) {
+        if (backend_value - ui_value).abs() < 0.01 {
+            self.slider_overrides.remove(&node_id);
+        } else {
+            self.slider_overrides.insert(node_id, ui_value);
+        }
+    }
+
+    fn master_slider_value(&self, group_id: GroupId, backend_value: f32) -> f32 {
+        self.master_slider_overrides
+            .get(&group_id)
+            .copied()
+            .unwrap_or(backend_value)
+    }
+
+    fn sync_master_slider_override(
+        &mut self,
+        group_id: GroupId,
+        backend_value: f32,
+        ui_value: f32,
+    ) {
+        if (backend_value - ui_value).abs() < 0.01 {
+            self.master_slider_overrides.remove(&group_id);
+        } else {
+            self.master_slider_overrides.insert(group_id, ui_value);
+        }
     }
 
     pub fn show(
@@ -195,7 +234,7 @@ impl MixerView {
     }
 
     fn show_strip(
-        &self,
+        &mut self,
         ui: &mut egui::Ui,
         strip: &MixerStrip,
         theme: &Theme,
@@ -235,7 +274,7 @@ impl MixerView {
                         self.draw_db_scale(ui, theme);
                         ui.add_space(8.0);
 
-                        let mut slider_value = strip.volume;
+                        let mut slider_value = self.slider_value(strip.node_id, strip.volume);
                         let slider_size = egui::vec2(46.0, 272.0);
                         let mut style = ui.style().as_ref().clone();
                         style.spacing.slider_width = 240.0;
@@ -259,9 +298,21 @@ impl MixerView {
                                 });
                             let resp = ui.add_sized(slider_size, slider);
                             if resp.changed() {
+                                self.sync_slider_override(
+                                    strip.node_id,
+                                    strip.volume,
+                                    slider_value,
+                                );
                                 response.volume_changes.push((strip.node_id, slider_value));
+                            } else {
+                                self.sync_slider_override(
+                                    strip.node_id,
+                                    strip.volume,
+                                    slider_value,
+                                );
                             }
                             if resp.double_clicked() {
+                                self.slider_overrides.insert(strip.node_id, 1.0);
                                 response.volume_changes.push((strip.node_id, 1.0));
                             }
                             resp.on_hover_text(
@@ -385,7 +436,7 @@ impl MixerView {
     }
 
     fn show_master_strip(
-        &self,
+        &mut self,
         ui: &mut egui::Ui,
         strips: &[MixerStrip],
         group: &NodeGroup,
@@ -451,7 +502,7 @@ impl MixerView {
                         ui.add_space(8.0);
 
                         // Master volume slider — adjusts all members proportionally.
-                        let mut slider_value = avg_volume;
+                        let mut slider_value = self.master_slider_value(group.id, avg_volume);
                         let slider_size = egui::vec2(46.0, 272.0);
                         let mut style = ui.style().as_ref().clone();
                         style.spacing.slider_width = 240.0;
@@ -477,6 +528,7 @@ impl MixerView {
                                 });
                             let resp = ui.add_sized(slider_size, slider);
                             if resp.changed() {
+                                self.sync_master_slider_override(group.id, avg_volume, slider_value);
                                 // Scale all members proportionally so their relative
                                 // balance is preserved.
                                 let old_avg = avg_volume;
@@ -486,12 +538,17 @@ impl MixerView {
                                     } else {
                                         slider_value.clamp(0.0, 2.0)
                                     };
+                                    self.slider_overrides.insert(strip.node_id, new_vol);
                                     response.volume_changes.push((strip.node_id, new_vol));
                                 }
+                            } else {
+                                self.sync_master_slider_override(group.id, avg_volume, slider_value);
                             }
                             if resp.double_clicked() {
+                                self.master_slider_overrides.insert(group.id, 1.0);
                                 // Reset all members to unity.
                                 for strip in strips {
+                                    self.slider_overrides.insert(strip.node_id, 1.0);
                                     response.volume_changes.push((strip.node_id, 1.0));
                                 }
                             }
