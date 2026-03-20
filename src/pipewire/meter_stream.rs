@@ -110,13 +110,22 @@ impl MeterStreamData {
 /// Shared meter data accessible from callbacks.
 type SharedMeterData = Rc<RefCell<MeterStreamData>>;
 
+/// How a node should be tapped for metering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeterTarget {
+    /// Capture the node directly.
+    Direct,
+    /// Capture the monitor stream of a real sink.
+    SinkMonitor,
+}
+
 /// Info about a registered node for metering.
 #[derive(Clone)]
 struct NodeMeterInfo {
     /// Object serial for targeting
     serial: String,
-    /// Whether this is a sink node (vs a source)
-    is_sink: bool,
+    /// How this node should be tapped for metering.
+    target: MeterTarget,
 }
 
 /// A manager for meter streams within the PipeWire thread.
@@ -141,6 +150,10 @@ struct MeterStreamHandle {
     _listener: StreamListener<SharedMeterData>,
     /// Last time this stream produced data (for staleness detection)
     last_data_time: std::time::Instant,
+    /// When this stream instance was created.
+    started_at: std::time::Instant,
+    /// Whether this stream has ever delivered valid audio data.
+    has_received_data: bool,
 }
 
 impl MeterStreamManager {
@@ -156,16 +169,15 @@ impl MeterStreamManager {
 
     /// Registers and optionally auto-starts metering for a node.
     /// Call this with core when auto-metering is needed.
-    /// `is_sink` should be true for AudioSink/StreamInputAudio nodes, false for sources.
     pub fn register_and_auto_meter(
         &mut self,
         core: &pipewire::core::Core,
         node_id: NodeId,
         serial: String,
-        is_sink: bool,
+        target: MeterTarget,
     ) {
         self.node_info
-            .insert(node_id, NodeMeterInfo { serial, is_sink });
+            .insert(node_id, NodeMeterInfo { serial, target });
         if self.auto_meter_all {
             self.start_metering(core, node_id);
         }
@@ -222,14 +234,10 @@ impl MeterStreamManager {
         }
 
         // Create the meter stream
-        match self.create_meter_stream(core, node_id, &info.serial, info.is_sink) {
+        match self.create_meter_stream(core, node_id, &info.serial, info.target) {
             Some(handle) => {
                 self.streams.insert(node_id, handle);
-                tracing::debug!(
-                    "Started metering node {:?} (is_sink={})",
-                    node_id,
-                    info.is_sink
-                );
+                tracing::debug!("Started metering node {:?} ({:?})", node_id, info.target);
                 true
             }
             None => {
@@ -255,6 +263,7 @@ impl MeterStreamManager {
             if let Ok(mut data) = handle.data.try_borrow_mut() {
                 if let Some(update) = data.take_update() {
                     handle.last_data_time = now;
+                    handle.has_received_data = true;
                     updates.push(update);
                 }
             }
@@ -277,7 +286,15 @@ impl MeterStreamManager {
         let stale_ids: Vec<NodeId> = self
             .streams
             .iter()
-            .filter(|(_, handle)| handle.last_data_time.elapsed() > stale_after)
+            .filter(|(_, handle)| {
+                let elapsed = handle.last_data_time.elapsed();
+                if handle.has_received_data {
+                    elapsed > stale_after
+                } else {
+                    let initial_grace = stale_after.max(std::time::Duration::from_secs(20));
+                    handle.started_at.elapsed() > initial_grace && elapsed > initial_grace
+                }
+            })
             .map(|(id, _)| *id)
             .collect();
 
@@ -294,17 +311,15 @@ impl MeterStreamManager {
         core: &pipewire::core::Core,
         node_id: NodeId,
         serial: &str,
-        is_sink: bool,
+        target: MeterTarget,
     ) -> Option<MeterStreamHandle> {
         // Stream properties for monitoring a specific node
         // Use TARGET_OBJECT with the serial number for targeting
         //
-        // For SINK nodes (e.g., speakers, apps receiving audio):
-        //   Use STREAM_CAPTURE_SINK=true to capture the monitor output
-        //
-        // For SOURCE nodes (e.g., mics, apps outputting audio like SuperCollider):
-        //   Don't use STREAM_CAPTURE_SINK - capture directly from the output
-        let props = if is_sink {
+        // Only real sink nodes should use monitor capture.
+        // Stream nodes are tapped directly; treating all "Input" nodes like sinks
+        // causes intermittent/no-data meter streams for some applications.
+        let props = if matches!(target, MeterTarget::SinkMonitor) {
             properties! {
                 *pipewire::keys::TARGET_OBJECT => serial,
                 *pipewire::keys::STREAM_CAPTURE_SINK => "true",
@@ -323,11 +338,11 @@ impl MeterStreamManager {
             }
         };
         tracing::debug!(
-            "Creating meter stream for node {:?} (id: {}, serial: {}, is_sink: {})",
+            "Creating meter stream for node {:?} (id: {}, serial: {}, target: {:?})",
             node_id,
             node_id.raw(),
             serial,
-            is_sink
+            target
         );
 
         // Create stream
@@ -538,6 +553,8 @@ impl MeterStreamManager {
             data,
             _listener: listener,
             last_data_time: std::time::Instant::now(),
+            started_at: std::time::Instant::now(),
+            has_received_data: false,
         })
     }
 

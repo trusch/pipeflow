@@ -213,6 +213,14 @@ impl PipeflowApp {
                 }
                 PwEvent::PortAdded(info) => {
                     let node_id = info.node_id;
+                    if state.graph.get_node(&node_id).is_none() {
+                        tracing::trace!(
+                            "Ignoring port for unknown/hidden node {:?}: {:?}",
+                            node_id,
+                            info.id
+                        );
+                        continue;
+                    }
                     let port = Port {
                         id: info.id,
                         node_id: info.node_id,
@@ -232,6 +240,17 @@ impl PipeflowApp {
                     state.graph.remove_port(&id);
                 }
                 PwEvent::LinkAdded(info) => {
+                    if state.graph.get_node(&info.output_node).is_none()
+                        || state.graph.get_node(&info.input_node).is_none()
+                    {
+                        tracing::trace!(
+                            "Ignoring link touching unknown/hidden nodes: {:?} ({} -> {})",
+                            info.id,
+                            info.output_node.raw(),
+                            info.input_node.raw()
+                        );
+                        continue;
+                    }
                     let link = Link {
                         id: info.id,
                         output_port: info.output_port,
@@ -350,6 +369,14 @@ impl PipeflowApp {
         state: &mut crate::core::state::AppState,
         info: crate::pipewire::events::NodeInfo,
     ) {
+        if is_metering_node(&info.name) {
+            tracing::trace!(
+                "Ignoring internal meter helper node in app state: {}",
+                info.name
+            );
+            return;
+        }
+
         let media_class = info.media_class.clone();
         let app_name = info.application_name.clone();
         let node_name = info.name.clone();
