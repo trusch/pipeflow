@@ -86,9 +86,7 @@ impl MixerView {
                             );
                             ui.add_space(16.0);
 
-                            self.show_master_strip(
-                                ui, &strips, group, theme, &mut response,
-                            );
+                            self.show_master_strip(ui, &strips, group, theme, &mut response);
                         });
                     });
             });
@@ -401,10 +399,7 @@ impl MixerView {
         // Derive master state from member strips.
         let count = strips.len() as f32;
         let avg_volume = strips.iter().map(|s| s.volume).sum::<f32>() / count;
-        let peak_meter = strips
-            .iter()
-            .map(|s| s.meter)
-            .fold(0.0_f32, f32::max);
+        let peak_meter = strips.iter().map(|s| s.meter).fold(0.0_f32, f32::max);
         let all_muted = strips.iter().all(|s| s.muted);
         let any_muted = strips.iter().any(|s| s.muted);
 

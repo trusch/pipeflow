@@ -11,7 +11,7 @@ use crate::core::commands::AppCommand;
 use crate::domain::audio::VolumeControl;
 use crate::domain::graph::MediaClass;
 use crate::pipewire::events::{MeterUpdate, PwEvent};
-use crate::pipewire::meter_stream::{MeterStreamManager, MeterTarget};
+use crate::pipewire::meter_stream::{MeterRegistration, MeterStreamManager, MeterTarget};
 use crate::util::id::{LinkId, NodeId};
 use crossbeam::channel::{bounded, Receiver, Sender};
 use libspa::pod::Pod;
@@ -346,7 +346,7 @@ fn try_connect_and_run(
 
                     let media_class = props
                         .get("media.class")
-                        .map(|s| MediaClass::from_pipewire_str(s));
+                        .map(MediaClass::from_pipewire_str);
 
                     if !is_internal_meter_node_name(node_name) {
                         if let Some(target) = meter_target_for_media_class(media_class.as_ref()) {
@@ -361,14 +361,16 @@ fn try_connect_and_run(
 
                             meter_manager_for_global.borrow_mut().register_and_auto_meter(
                                 &core_for_global,
-                                node_id,
-                                target_id,
-                                target,
-                                node_name.to_string(),
-                                app_name.clone(),
-                                media_class_label.clone(),
-                                target_object.clone(),
-                                client_api.clone(),
+                                MeterRegistration {
+                                    node_id,
+                                    serial: target_id,
+                                    target,
+                                    node_name: node_name.to_string(),
+                                    app_name: app_name.clone(),
+                                    media_class: media_class_label.clone(),
+                                    target_object: target_object.clone(),
+                                    client_api: client_api.clone(),
+                                },
                             );
                             tracing::debug!(
                                 "Meter candidate: node_id={} node_name={} app={:?} media_class={:?} serial={} target={:?} target.object={:?} client.api={:?}",

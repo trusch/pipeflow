@@ -142,6 +142,18 @@ struct NodeMeterInfo {
     client_api: Option<String>,
 }
 
+#[derive(Clone)]
+pub struct MeterRegistration {
+    pub node_id: NodeId,
+    pub serial: String,
+    pub target: MeterTarget,
+    pub node_name: String,
+    pub app_name: Option<String>,
+    pub media_class: Option<String>,
+    pub target_object: Option<String>,
+    pub client_api: Option<String>,
+}
+
 /// A manager for meter streams within the PipeWire thread.
 pub struct MeterStreamManager {
     /// Active meter streams by node ID
@@ -186,40 +198,33 @@ impl MeterStreamManager {
     pub fn register_and_auto_meter(
         &mut self,
         core: &pipewire::core::Core,
-        node_id: NodeId,
-        serial: String,
-        target: MeterTarget,
-        node_name: String,
-        app_name: Option<String>,
-        media_class: Option<String>,
-        target_object: Option<String>,
-        client_api: Option<String>,
+        registration: MeterRegistration,
     ) {
         tracing::debug!(
             "Registering meter target: node_id={} node_name={} app={:?} media_class={:?} serial={} target={:?} target.object={:?} client.api={:?}",
-            node_id.raw(),
-            node_name,
-            app_name,
-            media_class,
-            serial,
-            target,
-            target_object,
-            client_api
+            registration.node_id.raw(),
+            registration.node_name,
+            registration.app_name,
+            registration.media_class,
+            registration.serial,
+            registration.target,
+            registration.target_object,
+            registration.client_api
         );
         self.node_info.insert(
-            node_id,
+            registration.node_id,
             NodeMeterInfo {
-                serial,
-                target,
-                node_name,
-                app_name,
-                media_class,
-                target_object,
-                client_api,
+                serial: registration.serial,
+                target: registration.target,
+                node_name: registration.node_name,
+                app_name: registration.app_name,
+                media_class: registration.media_class,
+                target_object: registration.target_object,
+                client_api: registration.client_api,
             },
         );
         if self.auto_meter_all {
-            self.start_metering(core, node_id);
+            self.start_metering(core, registration.node_id);
         }
     }
 
