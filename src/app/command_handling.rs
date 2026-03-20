@@ -374,11 +374,11 @@ impl PipeflowApp {
                 self.handle_ui_command(UiCommand::SelectNode(node_id));
                 let state = self.state.read();
                 if let Some(pos) = state.ui.node_positions.get(&node_id) {
+                    self.components.graph_view.zoom = 1.0;
                     self.components.graph_view.pan = egui::Vec2::new(
                         -pos.x * self.components.graph_view.zoom,
                         -pos.y * self.components.graph_view.zoom,
                     );
-                    self.components.graph_view.zoom = 1.0;
                 }
             }
         }

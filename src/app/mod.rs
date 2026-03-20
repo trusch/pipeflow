@@ -166,8 +166,10 @@ impl PipeflowApp {
             ThemePreference::Dark => true,
             ThemePreference::Light => false,
             ThemePreference::System => {
-                // Use egui's system theme detection
-                ctx.style().visuals.dark_mode
+                // Use egui's actual system theme detection from OS
+                ctx.options(|o| o.system_theme)
+                    .map(|theme| theme == egui::Theme::Dark)
+                    .unwrap_or(true)
             }
         };
 
