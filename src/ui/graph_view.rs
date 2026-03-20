@@ -203,7 +203,7 @@ impl GraphView {
         }
 
         // Draw group boundaries (before nodes, after grid)
-        self.draw_group_boundaries(ui, groups, node_positions, &transform, theme);
+        self.draw_group_boundaries(ui, groups, node_positions, &transform, theme, &mut response);
 
         // Reset hovered link state before drawing links
         self.hovered_link = None;
@@ -853,8 +853,9 @@ impl GraphView {
         node_positions: &HashMap<NodeId, Position>,
         transform: &GraphTransform,
         theme: &Theme,
+        response: &mut GraphViewResponse,
     ) {
-        let painter = ui.painter();
+        let painter = ui.painter().clone();
         let padding = 20.0; // graph-space padding around members
 
         for group in &groups.groups {
@@ -920,13 +921,91 @@ impl GraphView {
                 200,
             );
             let font_size = 11.0 * self.zoom.max(0.4);
-            painter.text(
-                Pos2::new(screen_min.x + 6.0, screen_min.y + 4.0),
-                egui::Align2::LEFT_TOP,
-                &group.name,
+            let label_galley = painter.layout_no_wrap(
+                group.name.clone(),
                 egui::FontId::proportional(font_size),
                 label_color,
             );
+            let label_pos = Pos2::new(screen_min.x + 6.0, screen_min.y + 4.0);
+
+            if self.zoom >= 0.4 {
+                let header_height = (label_galley.size().y.max(font_size) + 6.0).max(16.0);
+                let header_rect = Rect::from_min_size(
+                    Pos2::new(label_pos.x - 3.0, label_pos.y - 2.0),
+                    Vec2::new(
+                        (label_galley.size().x + header_height + 10.0)
+                            .min((group_rect.width() - 12.0).max(header_height)),
+                        header_height,
+                    ),
+                );
+                let header_response = ui.interact(
+                    header_rect,
+                    ui.id().with(("group_header", group.id.0)),
+                    Sense::click(),
+                );
+                let hover_alpha = if header_response.hovered() { 44 } else { 26 };
+                let header_fill = Color32::from_rgba_unmultiplied(
+                    base_color.r(),
+                    base_color.g(),
+                    base_color.b(),
+                    hover_alpha,
+                );
+                painter.rect_filled(header_rect, header_height * 0.35, header_fill);
+                header_response.clone().on_hover_text(
+                    "Double-click the group header or use the faders button to open the mixer",
+                );
+                if header_response.double_clicked() {
+                    response.open_group_mixer = Some(group.id);
+                }
+
+                let label_draw_pos = Pos2::new(header_rect.min.x + 4.0, label_pos.y);
+                painter.galley(label_draw_pos, label_galley.clone(), label_color);
+
+                let icon_font_size = font_size * 0.9;
+                let icon_text = egui_phosphor::regular::FADERS;
+                let icon_galley = painter.layout_no_wrap(
+                    icon_text.to_string(),
+                    egui::FontId::new(icon_font_size, egui::FontFamily::Proportional),
+                    label_color,
+                );
+                let button_size = Vec2::splat(header_height - 4.0);
+                let button_rect = Rect::from_min_size(
+                    Pos2::new(
+                        header_rect.right() - button_size.x - 2.0,
+                        header_rect.min.y + 2.0,
+                    ),
+                    button_size,
+                );
+                let button_response = ui.interact(
+                    button_rect,
+                    ui.id().with(("group_mixer_button", group.id.0)),
+                    Sense::click(),
+                );
+                let button_fill_alpha = if button_response.hovered() { 90 } else { 56 };
+                let button_fill = Color32::from_rgba_unmultiplied(
+                    base_color.r(),
+                    base_color.g(),
+                    base_color.b(),
+                    button_fill_alpha,
+                );
+                painter.rect_filled(button_rect, button_rect.height() * 0.3, button_fill);
+                let icon_color = if button_response.hovered() {
+                    Color32::WHITE
+                } else {
+                    label_color
+                };
+                let icon_pos = Pos2::new(
+                    button_rect.center().x - icon_galley.size().x * 0.5,
+                    button_rect.center().y - icon_galley.size().y * 0.5,
+                );
+                painter.galley(icon_pos, icon_galley, icon_color);
+                button_response.clone().on_hover_text("Open mixer view");
+                if button_response.clicked() {
+                    response.open_group_mixer = Some(group.id);
+                }
+            } else {
+                painter.galley(label_pos, label_galley, label_color);
+            }
         }
     }
 

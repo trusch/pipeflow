@@ -1,5 +1,6 @@
 //! Shared graph-view types and responses.
 
+use crate::domain::groups::GroupId;
 use crate::util::id::{LinkId, NodeId, PortId};
 use egui::{Pos2, Vec2};
 use std::collections::HashMap;
@@ -119,4 +120,6 @@ pub struct GraphViewResponse {
     pub save_connections_as_rule: Option<NodeId>,
     /// Request to rename a node (opens rename dialog)
     pub rename_node: Option<NodeId>,
+    /// Request to open the mixer for a group (from in-graph group chrome)
+    pub open_group_mixer: Option<GroupId>,
 }

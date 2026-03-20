@@ -1483,6 +1483,11 @@ impl PipeflowApp {
                 tracing::warn!("Cannot rename node {:?}: node no longer exists", node_id);
             }
         }
+
+        // Open group mixer (from in-graph group chrome)
+        if let Some(group_id) = response.open_group_mixer {
+            self.components.center_view = CenterViewMode::GroupMixer(group_id);
+        }
     }
 
     /// Handles node drag in graph view.
