@@ -396,9 +396,7 @@ impl NodePanel {
                             let modifiers = ui.input(|i| i.modifiers);
                             response.toggle_node_selection = Some((other_node_id, modifiers.shift));
                         }
-                        name_response.on_hover_text(
-                            "Click to select, Shift+click to extend",
-                        );
+                        name_response.on_hover_text("Click to select, Shift+click to extend");
 
                         let status = if link.is_active { "live" } else { "paused" };
                         ui.weak(format!(
@@ -603,7 +601,7 @@ impl NodePanel {
                             ui.end_row();
 
                             ui.label("Name:");
-                            ui.add(egui::Label::new(&port.name).wrap());
+                            ui.add(egui::Label::new(port.full_display_name()).wrap());
                             ui.end_row();
 
                             if let Some(ref alias) = port.alias {
@@ -639,7 +637,11 @@ impl NodePanel {
     fn show_empty_state(ui: &mut Ui, _theme: &Theme) {
         ui.vertical_centered(|ui| {
             ui.add_space(40.0);
-            ui.label(RichText::new(egui_phosphor::regular::CURSOR_CLICK).size(32.0).weak());
+            ui.label(
+                RichText::new(egui_phosphor::regular::CURSOR_CLICK)
+                    .size(32.0)
+                    .weak(),
+            );
             ui.add_space(8.0);
             ui.weak("Select a node");
         });

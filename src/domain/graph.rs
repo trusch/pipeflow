@@ -278,8 +278,22 @@ impl Port {
         }
     }
 
-    /// Returns the display name for this port.
+    fn compact_port_name(name: &str) -> &str {
+        name.rsplit(':').next().unwrap_or(name)
+    }
+
+    /// Returns the UI display name for this port.
+    ///
+    /// PipeWire often prefixes the actual port name with a node/device path
+    /// (`node.name:playback_FL`). For visual display we only want the final
+    /// port segment.
     pub fn display_name(&self) -> &str {
+        let raw = self.alias.as_deref().unwrap_or(&self.name);
+        Self::compact_port_name(raw)
+    }
+
+    /// Returns the full raw port name (or alias if present) for tooltips/details.
+    pub fn full_display_name(&self) -> &str {
         self.alias.as_deref().unwrap_or(&self.name)
     }
 

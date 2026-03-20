@@ -1542,8 +1542,8 @@ impl GraphView {
             response.started_connection = Some(port.id);
         }
 
-        // Show tooltip with full port name on hover (consumes response)
-        port_response.on_hover_text(port.display_name());
+        // Show tooltip with full raw port name on hover (consumes response)
+        port_response.on_hover_text(port.full_display_name());
     }
 
     /// Draws a compact LED-style segmented meter directly on the painter.
