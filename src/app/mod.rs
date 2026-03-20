@@ -403,6 +403,7 @@ impl PipeflowApp {
                     &self.session_presence,
                     &self.config.meters,
                     state.ui.hide_uninteresting,
+                    state.ui.show_internal_meter_nodes,
                     &state.ui.layer_visibility,
                     can_undo,
                     can_redo,
@@ -438,6 +439,11 @@ impl PipeflowApp {
         if response.toggle_hide_background {
             let mut state = self.state.write();
             state.ui.toggle_hide_uninteresting();
+        }
+
+        if response.toggle_internal_meter_nodes {
+            let mut state = self.state.write();
+            state.ui.show_internal_meter_nodes = !state.ui.show_internal_meter_nodes;
         }
 
         if response.show_settings {
@@ -1133,6 +1139,7 @@ impl PipeflowApp {
                 &state.ui.uninteresting_nodes,
                 &state.ui.custom_names,
                 state.ui.hide_uninteresting,
+                state.ui.show_internal_meter_nodes,
                 &state.ui.layer_visibility,
                 &state.ui.filters,
                 &state.graph.ports,
@@ -1217,7 +1224,12 @@ impl PipeflowApp {
         };
 
         for node in state.graph.nodes.values() {
+            let is_meter = crate::util::is_metering_node(&node.name);
             let is_background = state.ui.uninteresting_nodes.contains(&node.id);
+            if !state.ui.show_internal_meter_nodes && is_meter {
+                summary.hidden_internal_meter_nodes += 1;
+                continue;
+            }
             if state.ui.hide_uninteresting && is_background {
                 summary.hidden_background += 1;
                 continue;
@@ -1276,6 +1288,12 @@ impl PipeflowApp {
                             summary.hidden_background
                         ));
                     }
+                    if summary.hidden_internal_meter_nodes > 0 {
+                        ui.label(format!(
+                            "• {} internal meter nodes hidden",
+                            summary.hidden_internal_meter_nodes
+                        ));
+                    }
                     if summary.dimmed_background > 0 {
                         ui.label(format!(
                             "• {} background nodes still visible",
@@ -1287,6 +1305,7 @@ impl PipeflowApp {
                         let mut state = self.state.write();
                         state.ui.filters.clear();
                         state.ui.hide_uninteresting = false;
+                        state.ui.show_internal_meter_nodes = true;
                         state.ui.layer_visibility = Default::default();
                     }
 
@@ -1298,6 +1317,13 @@ impl PipeflowApp {
                     if summary.hidden_background > 0 && ui.button("Show background").clicked() {
                         let mut state = self.state.write();
                         state.ui.hide_uninteresting = false;
+                    }
+
+                    if summary.hidden_internal_meter_nodes > 0
+                        && ui.button("Show meter helpers").clicked()
+                    {
+                        let mut state = self.state.write();
+                        state.ui.show_internal_meter_nodes = true;
                     }
                 });
             });

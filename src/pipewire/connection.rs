@@ -12,14 +12,14 @@ use crate::domain::audio::VolumeControl;
 use crate::domain::graph::MediaClass;
 use crate::pipewire::events::{MeterUpdate, PwEvent};
 use crate::pipewire::meter_stream::{MeterStreamManager, MeterTarget};
-use crate::util::id::{LinkId, NodeId, PortId};
+use crate::util::id::{LinkId, NodeId};
 use crossbeam::channel::{bounded, Receiver, Sender};
 use libspa::pod::Pod;
 use pipewire::node::{Node, NodeListener};
 use pipewire::properties::properties;
 use pipewire::proxy::{ProxyListener, ProxyT};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::thread::JoinHandle;
 
@@ -192,12 +192,6 @@ struct PwRuntimeState {
     next_link_id: u32,
     /// Bound node proxies for volume/mute control
     node_proxies: HashMap<NodeId, NodeProxyHandle>,
-    /// Internal helper node IDs that must never be shown in the graph.
-    hidden_meter_nodes: HashSet<NodeId>,
-    /// Internal helper port IDs that must never be shown in the graph.
-    hidden_meter_ports: HashSet<PortId>,
-    /// Internal helper link IDs that must never be shown in the graph.
-    hidden_meter_links: HashSet<LinkId>,
 }
 
 impl PwRuntimeState {
@@ -207,9 +201,6 @@ impl PwRuntimeState {
             // Start at a high ID to avoid conflicts with PipeWire's IDs
             next_link_id: 1_000_000,
             node_proxies: HashMap::new(),
-            hidden_meter_nodes: HashSet::new(),
-            hidden_meter_ports: HashSet::new(),
-            hidden_meter_links: HashSet::new(),
         }
     }
 
@@ -221,29 +212,6 @@ impl PwRuntimeState {
     /// Removes a node proxy.
     fn remove_node_proxy(&mut self, node_id: &NodeId) {
         self.node_proxies.remove(node_id);
-    }
-
-    fn mark_hidden_meter_node(&mut self, node_id: NodeId) {
-        self.hidden_meter_nodes.insert(node_id);
-    }
-
-    fn mark_hidden_meter_port(&mut self, port_id: PortId) {
-        self.hidden_meter_ports.insert(port_id);
-    }
-
-    fn mark_hidden_meter_link(&mut self, link_id: LinkId) {
-        self.hidden_meter_links.insert(link_id);
-    }
-
-    fn is_hidden_meter_node(&self, node_id: &NodeId) -> bool {
-        self.hidden_meter_nodes.contains(node_id)
-    }
-
-    fn remove_hidden_object(&mut self, raw_id: u32) -> bool {
-        let node_removed = self.hidden_meter_nodes.remove(&NodeId::new(raw_id));
-        let port_removed = self.hidden_meter_ports.remove(&PortId::new(raw_id));
-        let link_removed = self.hidden_meter_links.remove(&LinkId::new(raw_id));
-        node_removed || port_removed || link_removed
     }
 }
 
@@ -376,63 +344,53 @@ fn try_connect_and_run(
                     let node_name = props.get("node.name").unwrap_or("");
                     let node_id = NodeId::new(global.id);
 
-                    if is_internal_meter_node_name(node_name) {
-                        tracing::trace!(
-                            "Hiding internal meter node: {} ({})",
-                            node_name,
-                            global.id
-                        );
-                        state_for_global
-                            .borrow_mut()
-                            .mark_hidden_meter_node(node_id);
-                        return;
-                    }
-
                     let media_class = props
                         .get("media.class")
                         .map(|s| MediaClass::from_pipewire_str(s));
 
-                    if let Some(target) = meter_target_for_media_class(media_class.as_ref()) {
-                        let target_id = props
-                            .get("object.serial")
-                            .map(|s| s.to_string())
-                            .unwrap_or_else(|| global.id.to_string());
-                        let app_name = props.get("application.name").map(|s| s.to_string());
-                        let media_class_label = props.get("media.class").map(|s| s.to_string());
-                        let target_object = props.get("target.object").map(|s| s.to_string());
-                        let client_api = props.get("client.api").map(|s| s.to_string());
+                    if !is_internal_meter_node_name(node_name) {
+                        if let Some(target) = meter_target_for_media_class(media_class.as_ref()) {
+                            let target_id = props
+                                .get("object.serial")
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| global.id.to_string());
+                            let app_name = props.get("application.name").map(|s| s.to_string());
+                            let media_class_label = props.get("media.class").map(|s| s.to_string());
+                            let target_object = props.get("target.object").map(|s| s.to_string());
+                            let client_api = props.get("client.api").map(|s| s.to_string());
 
-                        meter_manager_for_global.borrow_mut().register_and_auto_meter(
-                            &core_for_global,
-                            node_id,
-                            target_id,
-                            target,
-                            node_name.to_string(),
-                            app_name.clone(),
-                            media_class_label.clone(),
-                            target_object.clone(),
-                            client_api.clone(),
-                        );
-                        tracing::debug!(
-                            "Meter candidate: node_id={} node_name={} app={:?} media_class={:?} serial={} target={:?} target.object={:?} client.api={:?}",
-                            node_id.raw(),
-                            node_name,
-                            app_name,
-                            media_class_label,
-                            props.get("object.serial").unwrap_or("<none>"),
-                            target,
-                            target_object,
-                            client_api,
-                        );
-
-                        if let Some(registry) = registry_weak.upgrade() {
-                            bind_node_proxy(
-                                &registry,
-                                &state_for_global,
-                                &event_tx_for_global,
-                                global,
+                            meter_manager_for_global.borrow_mut().register_and_auto_meter(
+                                &core_for_global,
                                 node_id,
+                                target_id,
+                                target,
+                                node_name.to_string(),
+                                app_name.clone(),
+                                media_class_label.clone(),
+                                target_object.clone(),
+                                client_api.clone(),
                             );
+                            tracing::debug!(
+                                "Meter candidate: node_id={} node_name={} app={:?} media_class={:?} serial={} target={:?} target.object={:?} client.api={:?}",
+                                node_id.raw(),
+                                node_name,
+                                app_name,
+                                media_class_label,
+                                props.get("object.serial").unwrap_or("<none>"),
+                                target,
+                                target_object,
+                                client_api,
+                            );
+
+                            if let Some(registry) = registry_weak.upgrade() {
+                                bind_node_proxy(
+                                    &registry,
+                                    &state_for_global,
+                                    &event_tx_for_global,
+                                    global,
+                                    node_id,
+                                );
+                            }
                         }
                     }
                 }
@@ -450,15 +408,6 @@ fn try_connect_and_run(
                     .unwrap_or_default();
                 let info =
                     crate::pipewire::events::PortInfo::from_properties(global.id, &props_map);
-                if state_for_global
-                    .borrow()
-                    .is_hidden_meter_node(&info.node_id)
-                {
-                    state_for_global
-                        .borrow_mut()
-                        .mark_hidden_meter_port(info.id);
-                    return;
-                }
                 let _ = event_tx_for_global.send(PwEvent::PortAdded(info));
             }
             pipewire::types::ObjectType::Link => {
@@ -472,26 +421,11 @@ fn try_connect_and_run(
                     .unwrap_or_default();
                 let info =
                     crate::pipewire::events::LinkInfo::from_properties(global.id, &props_map);
-                let should_hide = {
-                    let state = state_for_global.borrow();
-                    state.is_hidden_meter_node(&info.output_node)
-                        || state.is_hidden_meter_node(&info.input_node)
-                };
-                if should_hide {
-                    state_for_global
-                        .borrow_mut()
-                        .mark_hidden_meter_link(info.id);
-                    return;
-                }
                 let _ = event_tx_for_global.send(PwEvent::LinkAdded(info));
             }
             _ => handle_global_added(&event_tx_for_global, global),
         })
         .global_remove(move |id| {
-            if state_for_remove.borrow_mut().remove_hidden_object(id) {
-                return;
-            }
-
             // Clean up node proxy when removed
             let node_id = NodeId::new(id);
             {

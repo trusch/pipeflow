@@ -406,14 +406,6 @@ impl PipeflowApp {
         state: &mut crate::core::state::AppState,
         info: crate::pipewire::events::NodeInfo,
     ) {
-        if is_metering_node(&info.name) {
-            tracing::trace!(
-                "Ignoring internal meter helper node in app state: {}",
-                info.name
-            );
-            return;
-        }
-
         let media_class = info.media_class.clone();
         let app_name = info.application_name.clone();
         let node_name = info.name.clone();

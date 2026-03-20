@@ -58,6 +58,9 @@ pub struct UiState {
     /// Whether to hide uninteresting nodes from the graph view
     #[serde(default)]
     pub hide_uninteresting: bool,
+    /// Whether to show Pipeflow's internal meter helper nodes in the graph
+    #[serde(default)]
+    pub show_internal_meter_nodes: bool,
     /// Visibility settings for PipeWire stack layers
     #[serde(default)]
     pub layer_visibility: LayerVisibility,
@@ -87,6 +90,7 @@ impl Default for UiState {
             persistent_custom_names: HashMap::new(),
             persistent_volumes: HashMap::new(),
             hide_uninteresting: false,
+            show_internal_meter_nodes: false,
             layer_visibility: LayerVisibility::default(),
             initial_layout_done: false,
             zoom: 1.0,

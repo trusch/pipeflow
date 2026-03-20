@@ -76,6 +76,7 @@ pub(super) struct GraphVisibilitySummary {
     pub(super) hidden_by_focus: usize,
     pub(super) hidden_by_layer: usize,
     pub(super) hidden_background: usize,
+    pub(super) hidden_internal_meter_nodes: usize,
     pub(super) dimmed_background: usize,
 }
 
@@ -84,6 +85,7 @@ impl GraphVisibilitySummary {
         self.hidden_by_focus > 0
             || self.hidden_by_layer > 0
             || self.hidden_background > 0
+            || self.hidden_internal_meter_nodes > 0
             || self.dimmed_background > 0
     }
 }

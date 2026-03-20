@@ -33,6 +33,7 @@ impl Toolbar {
         session_presence: &SessionPresence,
         meter_config: &MeterConfig,
         hide_background: bool,
+        show_internal_meter_nodes: bool,
         layer_visibility: &LayerVisibility,
         can_undo: bool,
         can_redo: bool,
@@ -60,6 +61,7 @@ impl Toolbar {
                     ui,
                     meter_config,
                     hide_background,
+                    show_internal_meter_nodes,
                     layer_visibility,
                     &mut response,
                     theme,
@@ -343,6 +345,7 @@ impl Toolbar {
         ui: &mut Ui,
         meter_config: &MeterConfig,
         hide_background: bool,
+        show_internal_meter_nodes: bool,
         layer_visibility: &LayerVisibility,
         response: &mut ToolbarResponse,
         _theme: &Theme,
@@ -406,6 +409,17 @@ impl Toolbar {
                     }
                 }
             }
+
+            ui.separator();
+            let meter_node_label = if show_internal_meter_nodes {
+                "Hide internal meter nodes"
+            } else {
+                "Show internal meter nodes"
+            };
+            if ui.button(meter_node_label).clicked() {
+                response.toggle_internal_meter_nodes = true;
+                ui.close();
+            }
         });
     }
 
@@ -447,6 +461,8 @@ pub struct ToolbarResponse {
     pub toggle_hide_background: bool,
     /// Toggle visibility of a specific layer
     pub toggle_layer: Option<NodeLayer>,
+    /// Toggle whether internal meter helper nodes are visible
+    pub toggle_internal_meter_nodes: bool,
     /// Trigger patch organize
     pub auto_layout: bool,
     /// Fit the full patch in view

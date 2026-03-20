@@ -97,6 +97,7 @@ impl GraphView {
         uninteresting_nodes: &HashSet<NodeId>,
         custom_names: &HashMap<NodeId, String>,
         hide_uninteresting: bool,
+        show_internal_meter_nodes: bool,
         layer_visibility: &LayerVisibility,
         filters: &FilterSet,
         ports: &HashMap<PortId, Port>,
@@ -209,6 +210,24 @@ impl GraphView {
 
         // Draw links first (below nodes)
         for link in graph.links.values() {
+            let touches_hidden_meter = if !show_internal_meter_nodes {
+                graph
+                    .nodes
+                    .get(&link.output_node)
+                    .map(|n| is_metering_node(&n.name))
+                    .unwrap_or(false)
+                    || graph
+                        .nodes
+                        .get(&link.input_node)
+                        .map(|n| is_metering_node(&n.name))
+                        .unwrap_or(false)
+            } else {
+                false
+            };
+            if touches_hidden_meter {
+                continue;
+            }
+
             // Check if either endpoint is uninteresting
             let output_uninteresting = uninteresting_nodes.contains(&link.output_node);
             let input_uninteresting = uninteresting_nodes.contains(&link.input_node);
@@ -286,6 +305,11 @@ impl GraphView {
 
         for node in graph.nodes.values() {
             let is_uninteresting = uninteresting_nodes.contains(&node.id);
+            let is_meter = is_metering_node(&node.name);
+
+            if !show_internal_meter_nodes && is_meter {
+                continue;
+            }
 
             // Skip uninteresting nodes if hiding is enabled
             if hide_uninteresting && is_uninteresting {
@@ -314,7 +338,6 @@ impl GraphView {
                 continue;
             }
 
-            let is_meter = is_metering_node(&node.name);
             if is_meter {
                 // Defer meter nodes to second pass
                 meter_nodes.push(node);
@@ -485,6 +508,7 @@ impl GraphView {
                 graph,
                 node_positions,
                 hide_uninteresting,
+                show_internal_meter_nodes,
                 uninteresting_nodes,
                 layer_visibility,
                 filters,
@@ -506,6 +530,7 @@ impl GraphView {
         graph: &GraphState,
         node_positions: &HashMap<NodeId, Position>,
         hide_uninteresting: bool,
+        show_internal_meter_nodes: bool,
         uninteresting_nodes: &HashSet<NodeId>,
         layer_visibility: &LayerVisibility,
         filters: &FilterSet,
@@ -558,6 +583,9 @@ impl GraphView {
 
         for node in graph.nodes.values() {
             let is_uninteresting = uninteresting_nodes.contains(&node.id);
+            if !show_internal_meter_nodes && is_metering_node(&node.name) {
+                continue;
+            }
             if hide_uninteresting && is_uninteresting {
                 continue;
             }
