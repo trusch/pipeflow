@@ -156,6 +156,7 @@ impl HelpPanel {
                         Self::shortcut_row(ui, ",", "Toggle settings");
                         Self::shortcut_row(ui, "[ / ]", "Toggle left / right sidebar");
                         Self::shortcut_row(ui, "Ctrl+G", "Create group from selection");
+                        Self::shortcut_row(ui, "Ctrl+Shift+M", "Open the selected group mixer");
                         Self::shortcut_row(ui, "+/-", "Zoom in/out");
                         Self::shortcut_row(ui, "Ctrl+0", "Reset zoom / fit all");
                         Self::shortcut_row(ui, "Ctrl+Shift+R", "Smart reorganize layout");

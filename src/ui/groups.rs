@@ -200,8 +200,13 @@ impl GroupPanel {
                 if name_response.clicked() {
                     panel_response.select_group_members = Some(group_id);
                 }
-                name_response
-                    .on_hover_text(format!("{}\n\nClick to select all members", &group.name));
+                if name_response.double_clicked() {
+                    panel_response.open_mixer = Some(group_id);
+                }
+                name_response.on_hover_text(format!(
+                    "{}\n\nClick to select all members\nDouble-click to open the mixer",
+                    &group.name
+                ));
 
                 // Member count badge
                 let count = group.effective_member_count();

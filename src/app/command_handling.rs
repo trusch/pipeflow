@@ -13,6 +13,7 @@ use crate::util::layout::{
 };
 use crate::util::spatial::Position;
 
+use super::types::CenterViewMode;
 use super::PipeflowApp;
 
 fn rule_match_pattern(node: &Node, port_name: &str) -> MatchPattern {
@@ -173,6 +174,51 @@ impl PipeflowApp {
         }
     }
 
+    fn infer_group_for_mixer(&self) -> Option<crate::domain::groups::GroupId> {
+        let state = self.state.read();
+
+        if let CenterViewMode::GroupMixer(group_id) = self.components.center_view {
+            return Some(group_id);
+        }
+
+        if !state.ui.selected_nodes.is_empty() {
+            let mut candidates: Vec<_> = state
+                .ui
+                .groups
+                .groups
+                .iter()
+                .filter(|group| {
+                    state
+                        .ui
+                        .selected_nodes
+                        .iter()
+                        .all(|id| group.members.contains(id))
+                })
+                .collect();
+            candidates.sort_by_key(|group| group.members.len());
+            if let Some(group) = candidates.first() {
+                return Some(group.id);
+            }
+        }
+
+        if state.ui.groups.groups.len() == 1 {
+            return state.ui.groups.groups.first().map(|g| g.id);
+        }
+
+        None
+    }
+
+    fn open_group_mixer(&mut self) {
+        if let Some(group_id) = self.infer_group_for_mixer() {
+            self.components.center_view = CenterViewMode::GroupMixer(group_id);
+        } else {
+            self.set_status_message(
+                "Select a group member first, or create a group before opening the mixer",
+                true,
+            );
+        }
+    }
+
     /// Handles global keyboard shortcuts.
     pub(super) fn handle_global_shortcuts(&mut self, ctx: &egui::Context) {
         // Skip if command palette is open
@@ -185,6 +231,7 @@ impl PipeflowApp {
         let mut needs_open_palette = false;
         let mut needs_auto_layout = false;
         let mut needs_create_group = false;
+        let mut needs_open_group_mixer = false;
 
         ctx.input(|input| {
             // Ctrl+K / Ctrl+P - Open command palette
@@ -206,9 +253,13 @@ impl PipeflowApp {
                 needs_redo = true;
             }
 
-            // Escape - Clear selection
+            // Escape - Leave mixer or clear selection
             if input.key_pressed(egui::Key::Escape) {
-                self.handle_ui_command(UiCommand::ClearSelection);
+                if matches!(self.components.center_view, CenterViewMode::GroupMixer(_)) {
+                    self.components.center_view = CenterViewMode::Graph;
+                } else {
+                    self.handle_ui_command(UiCommand::ClearSelection);
+                }
             }
 
             // I - Toggle inspector panel
@@ -278,6 +329,11 @@ impl PipeflowApp {
             if input.key_pressed(egui::Key::G) && input.modifiers.command {
                 needs_create_group = true;
             }
+
+            // Ctrl+Shift+M - Open group mixer
+            if input.key_pressed(egui::Key::M) && input.modifiers.command && input.modifiers.shift {
+                needs_open_group_mixer = true;
+            }
         });
 
         if needs_open_palette {
@@ -289,6 +345,9 @@ impl PipeflowApp {
         }
         if needs_create_group {
             self.handle_ui_command(UiCommand::CreateGroupFromSelection(None));
+        }
+        if needs_open_group_mixer {
+            self.open_group_mixer();
         }
 
         // Execute undo/redo outside the input closure (needs &mut self)
@@ -365,6 +424,12 @@ impl PipeflowApp {
                 }
                 "auto_layout_selected" => {
                     self.perform_auto_layout(true);
+                }
+                "open_group_mixer" => {
+                    self.open_group_mixer();
+                }
+                "back_to_patch" => {
+                    self.components.center_view = CenterViewMode::Graph;
                 }
                 _ => {
                     tracing::warn!("Unknown custom command: {}", name);

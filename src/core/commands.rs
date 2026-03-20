@@ -341,6 +341,20 @@ impl CommandRegistry {
             action: CommandAction::Ui(UiCommand::CreateGroupFromSelection(None)),
         });
 
+        self.register(CommandEntry {
+            name: "Open Group Mixer".to_string(),
+            description: "Switch to the mixer view for the selected or nearest group".to_string(),
+            shortcut: Some("Ctrl+Shift+M".to_string()),
+            action: CommandAction::Custom("open_group_mixer".to_string()),
+        });
+
+        self.register(CommandEntry {
+            name: "Back to Patch".to_string(),
+            description: "Leave the group mixer and return to the patch graph".to_string(),
+            shortcut: Some("Escape".to_string()),
+            action: CommandAction::Custom("back_to_patch".to_string()),
+        });
+
         // Layout commands
         self.register(CommandEntry {
             name: "Organize Patch".to_string(),

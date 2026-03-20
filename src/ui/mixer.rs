@@ -27,6 +27,16 @@ struct MixerStrip {
     volume_failed: Option<String>,
 }
 
+const MIXER_DB_MARKS: &[(f32, &str)] = &[
+    (2.0, "+6"),
+    (1.0, "0"),
+    (0.707, "-3"),
+    (0.5, "-6"),
+    (0.25, "-12"),
+    (0.125, "-18"),
+    (0.0, "-∞"),
+];
+
 impl MixerView {
     pub fn new() -> Self {
         Self
@@ -119,6 +129,13 @@ impl MixerView {
                     )
                     .color(theme.text.muted),
                 );
+                ui.label(
+                    egui::RichText::new(
+                        "Shortcut: Ctrl+Shift+M opens the mixer for the selected group. Escape returns to the patch.",
+                    )
+                    .small()
+                    .color(theme.text.muted),
+                );
             });
         });
     }
@@ -182,7 +199,7 @@ impl MixerView {
             .corner_radius(18)
             .inner_margin(egui::Margin::symmetric(16, 16))
             .show(ui, |ui| {
-                ui.set_width(132.0);
+                ui.set_width(164.0);
                 ui.vertical_centered(|ui| {
                     ui.label(
                         egui::RichText::new(&strip.name)
@@ -197,30 +214,48 @@ impl MixerView {
                                 .color(theme.text.muted),
                         );
                     }
-                    ui.add_space(10.0);
+                    ui.add_space(12.0);
 
-                    self.draw_level_meter(ui, strip.meter, strip.muted);
-                    ui.add_space(10.0);
+                    ui.horizontal_top(|ui| {
+                        self.draw_db_scale(ui, theme);
+                        ui.add_space(8.0);
 
-                    let mut slider_value = strip.volume;
-                    let mut style = ui.style().as_ref().clone();
-                    style.spacing.slider_width = 220.0;
-                    style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(102, 162, 255);
-                    style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(124, 180, 255);
-                    style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(39, 45, 58);
-                    style.visuals.widgets.inactive.weak_bg_fill =
-                        egui::Color32::from_rgb(28, 33, 44);
-                    ui.scope(|ui| {
-                        ui.set_style(style);
-                        let slider = egui::Slider::new(&mut slider_value, 0.0..=2.0)
-                            .vertical()
-                            .show_value(false)
-                            .step_by(0.01)
-                            .trailing_fill(true);
-                        let resp = ui.add_sized(egui::vec2(42.0, 240.0), slider);
-                        if resp.changed() {
-                            response.volume_changes.push((strip.node_id, slider_value));
-                        }
+                        let mut slider_value = strip.volume;
+                        let slider_size = egui::vec2(46.0, 272.0);
+                        let mut style = ui.style().as_ref().clone();
+                        style.spacing.slider_width = 240.0;
+                        style.visuals.widgets.active.bg_fill =
+                            egui::Color32::from_rgb(102, 162, 255);
+                        style.visuals.widgets.hovered.bg_fill =
+                            egui::Color32::from_rgb(124, 180, 255);
+                        style.visuals.widgets.inactive.bg_fill =
+                            egui::Color32::from_rgb(39, 45, 58);
+                        style.visuals.widgets.inactive.weak_bg_fill =
+                            egui::Color32::from_rgb(28, 33, 44);
+                        ui.scope(|ui| {
+                            ui.set_style(style);
+                            let slider = egui::Slider::new(&mut slider_value, 0.0..=2.0)
+                                .vertical()
+                                .show_value(false)
+                                .step_by(0.01)
+                                .trailing_fill(true)
+                                .handle_shape(egui::style::HandleShape::Rect {
+                                    aspect_ratio: 0.55,
+                                });
+                            let resp = ui.add_sized(slider_size, slider);
+                            if resp.changed() {
+                                response.volume_changes.push((strip.node_id, slider_value));
+                            }
+                            if resp.double_clicked() {
+                                response.volume_changes.push((strip.node_id, 1.0));
+                            }
+                            resp.on_hover_text(
+                                "Drag to set volume. Double-click to reset to unity (0 dB).",
+                            );
+                        });
+
+                        ui.add_space(10.0);
+                        self.draw_level_meter(ui, strip.meter, strip.muted, slider_size.y);
                     });
 
                     ui.add_space(10.0);
@@ -229,6 +264,12 @@ impl MixerView {
                             .monospace()
                             .size(20.0)
                             .strong(),
+                    );
+                    ui.label(
+                        egui::RichText::new(Self::format_db(strip.volume))
+                            .monospace()
+                            .small()
+                            .color(theme.text.muted),
                     );
 
                     ui.add_space(8.0);
@@ -247,7 +288,7 @@ impl MixerView {
                             egui::Button::new(mute_text)
                                 .fill(mute_fill)
                                 .corner_radius(10)
-                                .min_size(egui::vec2(100.0, 32.0)),
+                                .min_size(egui::vec2(112.0, 32.0)),
                         )
                         .clicked()
                     {
@@ -270,27 +311,69 @@ impl MixerView {
             });
     }
 
-    fn draw_level_meter(&self, ui: &mut egui::Ui, level: f32, muted: bool) {
-        let desired = egui::vec2(72.0, 10.0);
+    fn draw_db_scale(&self, ui: &mut egui::Ui, theme: &Theme) {
+        let height = 272.0;
+        let width = 30.0;
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+        let painter = ui.painter();
+        for (value, label) in MIXER_DB_MARKS {
+            let y = rect.bottom() - (value / 2.0).clamp(0.0, 1.0) * rect.height();
+            painter.line_segment(
+                [
+                    egui::pos2(rect.right() - 6.0, y),
+                    egui::pos2(rect.right(), y),
+                ],
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 90, 110)),
+            );
+            painter.text(
+                egui::pos2(rect.left(), y),
+                egui::Align2::LEFT_CENTER,
+                *label,
+                egui::FontId::monospace(11.0),
+                theme.text.muted,
+            );
+        }
+    }
+
+    fn draw_level_meter(&self, ui: &mut egui::Ui, level: f32, muted: bool, height: f32) {
+        let desired = egui::vec2(16.0, height);
         let (rect, _) = ui.allocate_exact_size(desired, egui::Sense::hover());
         let painter = ui.painter();
-        let bg = egui::Color32::from_rgb(32, 38, 48);
-        painter.rect_filled(rect, 999.0, bg);
+        let bg = egui::Color32::from_rgb(22, 26, 34);
+        painter.rect_filled(rect, 8.0, bg);
 
-        let clamped = level.clamp(0.0, 1.0);
-        let fill_w = rect.width() * clamped;
-        if fill_w > 0.0 {
-            let fill_rect = egui::Rect::from_min_size(rect.min, egui::vec2(fill_w, rect.height()));
-            let fill = if muted {
+        let segments = 24;
+        let gap = 2.0;
+        let segment_height = (rect.height() - gap * (segments as f32 - 1.0)) / segments as f32;
+        let active_segments = ((level.clamp(0.0, 1.2) / 1.2) * segments as f32).ceil() as usize;
+
+        for i in 0..segments {
+            let top = rect.bottom() - (i as f32 + 1.0) * segment_height - i as f32 * gap;
+            let seg_rect = egui::Rect::from_min_size(
+                egui::pos2(rect.left(), top),
+                egui::vec2(rect.width(), segment_height),
+            );
+            let is_active = i < active_segments;
+            let color = if !is_active {
+                egui::Color32::from_rgb(34, 39, 48)
+            } else if muted {
                 egui::Color32::from_rgb(120, 70, 70)
-            } else if level > 1.0 {
-                egui::Color32::from_rgb(255, 90, 90)
-            } else if level > 0.8 {
-                egui::Color32::from_rgb(255, 210, 100)
+            } else if i > 18 {
+                egui::Color32::from_rgb(255, 94, 94)
+            } else if i > 14 {
+                egui::Color32::from_rgb(255, 206, 96)
             } else {
                 egui::Color32::from_rgb(88, 218, 152)
             };
-            painter.rect_filled(fill_rect, 999.0, fill);
+            painter.rect_filled(seg_rect, 2.0, color);
+        }
+    }
+
+    fn format_db(volume: f32) -> String {
+        if volume <= 0.0001 {
+            "−∞ dB".to_string()
+        } else {
+            format!("{:+.1} dB", 20.0 * volume.log10())
         }
     }
 }
