@@ -19,7 +19,7 @@ mod types;
 mod ui_panels;
 
 pub(crate) use self::types::AppComponents;
-use self::types::{FeedbackLevel, GraphVisibilitySummary, WorkspaceSection};
+use self::types::{CenterViewMode, FeedbackLevel, GraphVisibilitySummary, WorkspaceSection};
 use crate::core::commands::{AppCommand, CommandHandler, UiCommand};
 use crate::core::config::Config;
 use crate::core::config::ThemePreference;
@@ -121,7 +121,7 @@ impl eframe::App for PipeflowApp {
         self.render_status_bar(ctx);
         self.render_inspector_panel(ctx);
         self.render_left_panel(ctx);
-        self.render_graph_view(ctx);
+        self.render_center_panel(ctx);
 
         // --- Persistence ---
         self.handle_layout_save();
@@ -972,6 +972,10 @@ impl PipeflowApp {
                 state.ui.selected_nodes.insert(node_id);
             }
         }
+
+        if let Some(group_id) = response.open_mixer {
+            self.components.center_view = CenterViewMode::GroupMixer(group_id);
+        }
     }
 
     /// Handles rules panel responses.
@@ -1063,6 +1067,14 @@ impl PipeflowApp {
         }
     }
 
+    /// Renders the central workspace area.
+    fn render_center_panel(&mut self, ctx: &egui::Context) {
+        match self.components.center_view {
+            CenterViewMode::Graph => self.render_graph_view(ctx),
+            CenterViewMode::GroupMixer(group_id) => self.render_group_mixer_view(ctx, group_id),
+        }
+    }
+
     /// Renders the central graph view.
     fn render_graph_view(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -1123,6 +1135,43 @@ impl PipeflowApp {
             }
 
             self.handle_graph_view_response(ctx, response);
+        });
+    }
+
+    fn render_group_mixer_view(
+        &mut self,
+        ctx: &egui::Context,
+        group_id: crate::domain::groups::GroupId,
+    ) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let state = self.state.read();
+            let maybe_group = state.ui.groups.get_group(&group_id).cloned();
+            let response = if let Some(group) = maybe_group.as_ref() {
+                self.components
+                    .mixer_view
+                    .show(ui, &state.graph, group, &self.components.theme)
+            } else {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.heading("That group no longer exists");
+                    ui.label("Return to the patch view and pick another group.");
+                });
+                crate::ui::mixer::MixerViewResponse {
+                    back_to_graph: true,
+                    ..Default::default()
+                }
+            };
+            drop(state);
+
+            if response.back_to_graph {
+                self.components.center_view = CenterViewMode::Graph;
+            }
+            for node_id in response.mute_toggles {
+                self.handle_mute_toggle(node_id);
+            }
+            for (node_id, volume) in response.volume_changes {
+                self.handle_volume_change(node_id, volume);
+            }
         });
     }
 

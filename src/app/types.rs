@@ -3,10 +3,12 @@
 use crate::core::commands::CommandRegistry;
 use crate::core::config::Config;
 use crate::core::history::UndoStack;
+use crate::domain::groups::GroupId;
 use crate::domain::snapshots::SnapshotManager;
 use crate::ui::command_palette::CommandPalette;
 use crate::ui::graph_view::GraphView;
 use crate::ui::groups::GroupPanel;
+use crate::ui::mixer::MixerView;
 use crate::ui::rules::RulesPanel;
 use crate::ui::sidebar::SidebarState;
 use crate::ui::snapshots::SnapshotPanel;
@@ -34,6 +36,12 @@ impl RenameNodeDialog {
         self.node_id = None;
         self.input.clear();
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CenterViewMode {
+    Graph,
+    GroupMixer(GroupId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,6 +120,8 @@ pub(crate) struct AppComponents {
     pub rules_panel: RulesPanel,
     /// Snapshot management panel
     pub snapshot_panel: SnapshotPanel,
+    /// Mixer view for groups
+    pub mixer_view: MixerView,
     /// Snapshot manager (persistence)
     pub snapshot_manager: SnapshotManager,
     /// Visual theme settings
@@ -158,6 +168,8 @@ pub(crate) struct AppComponents {
     pub right_sidebar: SidebarState,
     /// Current left-side workspace grouping
     pub active_workspace: WorkspaceSection,
+    /// Current central view mode
+    pub center_view: CenterViewMode,
 }
 
 impl AppComponents {
@@ -181,6 +193,7 @@ impl AppComponents {
             group_panel: GroupPanel::new(),
             rules_panel: RulesPanel::new(),
             snapshot_panel: SnapshotPanel::new(),
+            mixer_view: MixerView::new(),
             snapshot_manager,
             theme: Theme::dark(),
             show_inspector: true,
@@ -196,6 +209,7 @@ impl AppComponents {
             left_sidebar: SidebarState::default(),
             right_sidebar: SidebarState::default(),
             active_workspace: WorkspaceSection::Patch,
+            center_view: CenterViewMode::Graph,
         }
     }
 }

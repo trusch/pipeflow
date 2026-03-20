@@ -13,6 +13,7 @@ pub mod graph_view;
 pub mod groups;
 pub mod help;
 pub mod help_texts;
+pub mod mixer;
 pub mod node_panel;
 pub mod rules;
 pub mod settings;

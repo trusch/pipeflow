@@ -224,6 +224,14 @@ impl GroupPanel {
                     groups_to_remove.push(group_id);
                 }
 
+                if ui
+                    .small_button(egui_phosphor::regular::FADERS)
+                    .on_hover_text("Open mixer view")
+                    .clicked()
+                {
+                    panel_response.open_mixer = Some(group_id);
+                }
+
                 // Edit/Rename
                 if ui
                     .small_button(egui_phosphor::regular::PENCIL_SIMPLE)
@@ -303,6 +311,8 @@ pub struct GroupPanelResponse {
     pub select_group_members: Option<GroupId>,
     /// Toggle a node's selection state (with shift = extend, without = replace)
     pub toggle_node_selection: Option<(NodeId, bool)>,
+    /// Open the dedicated mixer view for a group
+    pub open_mixer: Option<GroupId>,
     /// A group was renamed (group_id, new_name)
     pub renamed_group: Option<(GroupId, String)>,
 }
