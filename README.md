@@ -66,6 +66,27 @@ Requires Rust 1.88+ (stable). The `network` feature (gRPC remote control) is ena
 cargo install --path . --no-default-features
 ```
 
+### Nix / NixOS
+
+A flake is included for reproducible builds and for NixOS runtime compatibility.
+
+```bash
+nix run
+```
+
+```bash
+nix build
+```
+
+For local development:
+
+```bash
+nix develop
+cargo run
+```
+
+The dev shell and wrapped package both expose the runtime libraries that `winit` loads dynamically on Linux (Wayland/X11), which avoids the usual NixOS `The wayland library could not be loaded` failure.
+
 ### Desktop Entry
 
 To add Pipeflow to your application launcher:
