@@ -81,6 +81,11 @@ impl GraphView {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Returns true while node fade animations are still settling.
+    pub fn is_animating(&self) -> bool {
+        self.node_alphas.values().any(|&alpha| alpha < 1.0)
+    }
 }
 
 /// Response from the graph view.

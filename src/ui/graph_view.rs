@@ -198,10 +198,7 @@ impl GraphView {
                 self.node_alphas.remove(&id);
             }
 
-            // Request repaint while any node is animating
-            if self.node_alphas.values().any(|&a| a < 1.0) {
-                ui.ctx().request_repaint();
-            }
+            // Repaint pacing is coordinated by the app so background windows can be throttled.
         }
 
         // Draw group boundaries (before nodes, after grid)

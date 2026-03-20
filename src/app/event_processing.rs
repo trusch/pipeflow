@@ -74,12 +74,12 @@ impl PipeflowApp {
     /// failure mode where changing one channel on a multi-output device makes all sibling
     /// links pulse because we fell back to coarse node-wide activity. Only when we lack
     /// channel information do we fall back to node-level meter activity.
-    pub(super) fn update_link_meters(&mut self) {
+    pub(super) fn update_link_meters(&mut self, dt: f32) {
         if !self.config.meters.enabled {
             return;
         }
 
-        let dt = 1.0 / 60.0;
+        let dt = dt.clamp(1.0 / 240.0, 0.25);
         let refresh_hz = self.config.meters.refresh_rate.max(1) as u64;
         let refresh_interval_ms = 1000 / refresh_hz;
         let stale_threshold = std::time::Duration::from_millis((refresh_interval_ms * 4).max(120));

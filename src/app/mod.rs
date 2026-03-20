@@ -41,6 +41,12 @@ use crate::util::spatial::Position;
 ///
 /// Contains the core application state and connection handlers.
 /// UI components are grouped in [`AppComponents`] for better organization.
+const BACKGROUND_ACTIVE_REPAINT_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(100);
+const IDLE_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+const BACKGROUND_IDLE_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+const MINIMIZED_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
 pub struct PipeflowApp {
     // --- Core state ---
     /// Shared application state (graph, UI state, safety settings)
@@ -89,7 +95,7 @@ impl eframe::App for PipeflowApp {
 
         // --- Meter Updates ---
         self.process_meter_updates();
-        self.update_link_meters();
+        self.update_link_meters(ctx.input(|i| i.stable_dt));
 
         // --- Input Processing ---
         if self.components.command_palette.handle_shortcuts(ctx) {
@@ -132,13 +138,18 @@ impl eframe::App for PipeflowApp {
         let meters_active = self.config.meters.enabled;
         let sidebars_animating = self.components.left_sidebar.is_animating()
             || self.components.right_sidebar.is_animating();
+        let graph_animating = self.components.graph_view.is_animating();
+        let is_focused = Self::viewport_is_focused(ctx);
+        let is_minimized = Self::viewport_is_minimized(ctx);
 
-        if meters_active || has_animations || sidebars_animating {
-            // Repaint at ~60 Hz when active
-            ctx.request_repaint();
+        if let Some(delay) = Self::repaint_delay(
+            is_focused,
+            is_minimized,
+            meters_active || has_animations || sidebars_animating || graph_animating,
+        ) {
+            ctx.request_repaint_after(delay);
         } else {
-            // When idle, repaint at ~4 Hz to catch external PipeWire events
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            ctx.request_repaint();
         }
     }
 
@@ -186,13 +197,40 @@ impl PipeflowApp {
         }
     }
 
-    /// Updates position animations and requests repaint if needed.
+    /// Updates position animations.
     fn update_animations(&mut self, ctx: &egui::Context) {
         let mut state = self.state.write();
         let dt = ctx.input(|i| i.stable_dt);
-        let has_animations = state.ui.update_animations(dt);
-        if has_animations {
-            ctx.request_repaint();
+        state.ui.update_animations(dt);
+    }
+
+    fn viewport_is_focused(ctx: &egui::Context) -> bool {
+        ctx.input(|i| i.viewport().focused.unwrap_or(i.focused))
+    }
+
+    fn viewport_is_minimized(ctx: &egui::Context) -> bool {
+        ctx.input(|i| i.viewport().minimized.unwrap_or(false))
+    }
+
+    fn repaint_delay(
+        is_focused: bool,
+        is_minimized: bool,
+        has_active_animation_or_metering: bool,
+    ) -> Option<std::time::Duration> {
+        if is_minimized {
+            return Some(MINIMIZED_REPAINT_INTERVAL);
+        }
+
+        if has_active_animation_or_metering {
+            if is_focused {
+                None
+            } else {
+                Some(BACKGROUND_ACTIVE_REPAINT_INTERVAL)
+            }
+        } else if is_focused {
+            Some(IDLE_REPAINT_INTERVAL)
+        } else {
+            Some(BACKGROUND_IDLE_REPAINT_INTERVAL)
         }
     }
 
@@ -456,9 +494,7 @@ impl PipeflowApp {
 
         // Animate sidebar
         let dt = ctx.input(|i| i.stable_dt);
-        if self.components.right_sidebar.animate(dt) {
-            ctx.request_repaint();
-        }
+        self.components.right_sidebar.animate(dt);
 
         let width = self.components.right_sidebar.current_width;
         let show_collapsed = self.components.right_sidebar.show_collapsed_content();
@@ -783,9 +819,7 @@ impl PipeflowApp {
     /// Renders the left panel (filters, groups, rules).
     fn render_left_panel(&mut self, ctx: &egui::Context) {
         let dt = ctx.input(|i| i.stable_dt);
-        if self.components.left_sidebar.animate(dt) {
-            ctx.request_repaint();
-        }
+        self.components.left_sidebar.animate(dt);
 
         let width = self.components.left_sidebar.current_width;
         let show_collapsed = self.components.left_sidebar.show_collapsed_content();
@@ -1577,6 +1611,10 @@ impl PipeflowApp {
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        PipeflowApp, BACKGROUND_ACTIVE_REPAINT_INTERVAL, BACKGROUND_IDLE_REPAINT_INTERVAL,
+        IDLE_REPAINT_INTERVAL, MINIMIZED_REPAINT_INTERVAL,
+    };
     use crate::core::state::create_shared_state;
 
     #[test]
@@ -1584,5 +1622,42 @@ mod tests {
         let state = create_shared_state();
         let read = state.read();
         assert!(read.graph.nodes.is_empty());
+    }
+
+    #[test]
+    fn test_repaint_delay_keeps_focused_active_windows_realtime() {
+        assert_eq!(PipeflowApp::repaint_delay(true, false, true), None);
+    }
+
+    #[test]
+    fn test_repaint_delay_throttles_visible_unfocused_active_windows() {
+        assert_eq!(
+            PipeflowApp::repaint_delay(false, false, true),
+            Some(BACKGROUND_ACTIVE_REPAINT_INTERVAL)
+        );
+    }
+
+    #[test]
+    fn test_repaint_delay_uses_idle_cadence_when_unfocused_and_idle() {
+        assert_eq!(
+            PipeflowApp::repaint_delay(false, false, false),
+            Some(BACKGROUND_IDLE_REPAINT_INTERVAL)
+        );
+        assert_eq!(
+            PipeflowApp::repaint_delay(true, false, false),
+            Some(IDLE_REPAINT_INTERVAL)
+        );
+    }
+
+    #[test]
+    fn test_repaint_delay_prioritizes_minimized_windows() {
+        assert_eq!(
+            PipeflowApp::repaint_delay(true, true, true),
+            Some(MINIMIZED_REPAINT_INTERVAL)
+        );
+        assert_eq!(
+            PipeflowApp::repaint_delay(false, true, false),
+            Some(MINIMIZED_REPAINT_INTERVAL)
+        );
     }
 }
