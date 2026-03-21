@@ -25,7 +25,8 @@ struct MixerStrip {
     node_id: NodeId,
     name: String,
     subtitle: Option<String>,
-    volume: f32,
+    backend_volume: f32,
+    effective_volume: f32,
     muted: bool,
     meter: f32,
     volume_failed: Option<String>,
@@ -235,6 +236,7 @@ impl MixerView {
                     .get(node_id)
                     .map(|m| m.get_decayed_max_peak(std::time::Duration::from_millis(180)))
                     .unwrap_or(0.0);
+                let backend_volume = volume.master;
                 Some(MixerStrip {
                     node_id: *node_id,
                     name: node.display_name().to_string(),
@@ -242,7 +244,8 @@ impl MixerView {
                         .media_class
                         .as_ref()
                         .map(|m| m.display_name().to_string()),
-                    volume: volume.master,
+                    backend_volume,
+                    effective_volume: self.slider_value(*node_id, backend_volume),
                     muted: volume.muted,
                     meter,
                     volume_failed: graph.volume_control_failed.get(node_id).cloned(),
@@ -298,7 +301,7 @@ impl MixerView {
                             self.draw_db_scale(ui, theme);
                             ui.add_space(8.0);
 
-                            let mut slider_value = self.slider_value(strip.node_id, strip.volume);
+                            let mut slider_value = strip.effective_volume;
                             let slider_size = egui::vec2(48.0, MIXER_FADER_HEIGHT);
                             let mut style = ui.style().as_ref().clone();
                             style.spacing.slider_width = 240.0;
@@ -321,23 +324,22 @@ impl MixerView {
                                         aspect_ratio: 0.55,
                                     });
                                 let resp = ui.add_sized(slider_size, slider);
-                                if resp.changed() {
+                                if resp.double_clicked() {
+                                    slider_value = 1.0;
+                                }
+                                if resp.changed() || resp.double_clicked() {
                                     self.sync_slider_override(
                                         strip.node_id,
-                                        strip.volume,
+                                        strip.backend_volume,
                                         slider_value,
                                     );
                                     response.volume_changes.push((strip.node_id, slider_value));
                                 } else {
                                     self.sync_slider_override(
                                         strip.node_id,
-                                        strip.volume,
+                                        strip.backend_volume,
                                         slider_value,
                                     );
-                                }
-                                if resp.double_clicked() {
-                                    self.slider_overrides.insert(strip.node_id, 1.0);
-                                    response.volume_changes.push((strip.node_id, 1.0));
                                 }
                                 resp.on_hover_text(
                                     "Drag to set volume. Double-click to reset to unity (0 dB).",
@@ -350,18 +352,11 @@ impl MixerView {
 
                         ui.add_space(10.0);
                         ui.label(
-                            egui::RichText::new(format!("{:.0}%", strip.volume * 100.0))
+                            egui::RichText::new(Self::format_volume_pair(strip.effective_volume))
                                 .monospace()
-                                .size(20.0)
+                                .size(18.0)
                                 .strong(),
                         );
-                        ui.label(
-                            egui::RichText::new(Self::format_db(strip.volume))
-                                .monospace()
-                                .small()
-                                .color(theme.text.muted),
-                        );
-
                         ui.add_space(8.0);
                         let mute_text = if strip.muted {
                             format!("{} Muted", egui_phosphor::regular::SPEAKER_SLASH)
@@ -474,7 +469,7 @@ impl MixerView {
 
         // Derive master state from member strips.
         let count = strips.len() as f32;
-        let avg_volume = strips.iter().map(|s| s.volume).sum::<f32>() / count;
+        let avg_volume = strips.iter().map(|s| s.effective_volume).sum::<f32>() / count;
         let peak_meter = strips.iter().map(|s| s.meter).fold(0.0_f32, f32::max);
         let all_muted = strips.iter().all(|s| s.muted);
         let any_muted = strips.iter().any(|s| s.muted);
@@ -547,14 +542,21 @@ impl MixerView {
                                     aspect_ratio: 0.55,
                                 });
                             let resp = ui.add_sized(slider_size, slider);
-                            if resp.changed() {
+                            if resp.double_clicked() {
+                                slider_value = 1.0;
+                            }
+                            if resp.changed() || resp.double_clicked() {
                                 self.sync_master_slider_override(group.id, avg_volume, slider_value);
                                 // Scale all members proportionally so their relative
-                                // balance is preserved.
+                                // balance is preserved, using the current effective levels
+                                // rather than stale backend values.
                                 let old_avg = avg_volume;
                                 for strip in strips {
-                                    let new_vol = if old_avg > 0.0001 {
-                                        (strip.volume / old_avg * slider_value).clamp(0.0, 2.0)
+                                    let new_vol = if resp.double_clicked() {
+                                        1.0
+                                    } else if old_avg > 0.0001 {
+                                        (strip.effective_volume / old_avg * slider_value)
+                                            .clamp(0.0, 2.0)
                                     } else {
                                         slider_value.clamp(0.0, 2.0)
                                     };
@@ -563,14 +565,6 @@ impl MixerView {
                                 }
                             } else {
                                 self.sync_master_slider_override(group.id, avg_volume, slider_value);
-                            }
-                            if resp.double_clicked() {
-                                self.master_slider_overrides.insert(group.id, 1.0);
-                                // Reset all members to unity.
-                                for strip in strips {
-                                    self.slider_overrides.insert(strip.node_id, 1.0);
-                                    response.volume_changes.push((strip.node_id, 1.0));
-                                }
                             }
                             resp.on_hover_text(
                                 "Master fader — scales all member volumes proportionally.\nDouble-click to reset all to unity (0 dB).",
@@ -583,18 +577,11 @@ impl MixerView {
 
                     ui.add_space(10.0);
                     ui.label(
-                        egui::RichText::new(format!("{:.0}%", avg_volume * 100.0))
+                        egui::RichText::new(Self::format_volume_pair(avg_volume))
                             .monospace()
-                            .size(20.0)
+                            .size(18.0)
                             .strong(),
                     );
-                    ui.label(
-                        egui::RichText::new(Self::format_db(avg_volume))
-                            .monospace()
-                            .small()
-                            .color(theme.text.muted),
-                    );
-
                     ui.add_space(8.0);
 
                     // Master mute toggles all members.
@@ -639,5 +626,9 @@ impl MixerView {
         } else {
             format!("{:+.1} dB", 20.0 * volume.log10())
         }
+    }
+
+    fn format_volume_pair(volume: f32) -> String {
+        format!("{} ({:.0}%)", Self::format_db(volume), volume * 100.0)
     }
 }
