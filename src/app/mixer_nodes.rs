@@ -38,6 +38,7 @@ impl MixerNodeManager {
     }
 
     /// Returns a mutable reference to a mixer node's state.
+    #[allow(dead_code)]
     pub fn get_mut(&mut self, node_id: &NodeId) -> Option<&mut MixerNodeState> {
         self.nodes.get_mut(node_id)
     }
@@ -95,6 +96,7 @@ impl MixerNodeManager {
     }
 
     /// Finds a mixer node by its PipeWire node name prefix.
+    #[allow(dead_code)]
     pub fn find_by_pw_name(&self, pw_name: &str) -> Option<NodeId> {
         // We identify mixer nodes by name prefix "pipeflow-mixer-"
         let display_name = pw_name.strip_prefix("pipeflow-mixer-")?;

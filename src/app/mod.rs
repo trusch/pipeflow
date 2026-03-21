@@ -426,7 +426,7 @@ impl PipeflowApp {
                 .any(|(_, s)| s.name == name);
             if name_taken {
                 self.set_status_message(
-                    &format!("A mixer node named '{}' already exists", name),
+                    format!("A mixer node named '{}' already exists", name),
                     true,
                 );
                 self.components.create_mixer_dialog.close();

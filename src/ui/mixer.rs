@@ -867,6 +867,7 @@ impl MixerView {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn show_node_summary_card(
         &self,
         ui: &mut egui::Ui,

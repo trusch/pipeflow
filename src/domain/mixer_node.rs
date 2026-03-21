@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 /// Parameters needed to create a new mixer node.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct MixerNodeConfig {
     /// Display name for the mixer.
     pub name: String,

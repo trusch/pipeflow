@@ -1160,13 +1160,13 @@ fn handle_command(
             // pw-loopback creates a virtual sink that appears in the graph.
             match std::process::Command::new("pw-loopback")
                 .args([
-                    &format!("--capture-props=media.class=Audio/Sink"),
-                    &format!("--capture-props=node.name={}", node_name),
-                    &format!("--capture-props=node.description={}", name),
-                    &format!("--capture-props=audio.channels={}", channel_count.max(2)),
-                    &format!("--playback-props=node.name={}-out", node_name),
-                    &format!("--playback-props=node.description={} Output", name),
-                    &format!("--playback-props=media.class=Audio/Source"),
+                    "--capture-props=media.class=Audio/Sink".to_string(),
+                    format!("--capture-props=node.name={}", node_name),
+                    format!("--capture-props=node.description={}", name),
+                    format!("--capture-props=audio.channels={}", channel_count.max(2)),
+                    format!("--playback-props=node.name={}-out", node_name),
+                    format!("--playback-props=node.description={} Output", name),
+                    "--playback-props=media.class=Audio/Source".to_string(),
                 ])
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
@@ -1211,15 +1211,7 @@ fn handle_command(
                 registry.destroy_global(global_id);
             }
         }
-        // Mixer strip/master commands are app-level only; they don't reach PipeWire.
-        AppCommand::SetMixerStripGain { .. }
-        | AppCommand::SetMixerStripMute { .. }
-        | AppCommand::SetMixerMasterGain { .. }
-        | AppCommand::SetMixerMasterMute { .. } => {
-            // These are handled entirely in the app layer (MixerNodeManager).
-            // They should not be sent to the PipeWire thread, but if they arrive
-            // here we just ignore them.
-        }
+
         AppCommand::Disconnect => {
             tracing::info!("Disconnect requested, stopping all meter streams");
             meter_manager.stop_all();

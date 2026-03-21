@@ -85,39 +85,8 @@ pub enum AppCommand {
         name: String,
     },
 
-    // Mixer node control (app-level only — these do NOT reach PipeWire)
-    /// Set a mixer strip's gain
-    SetMixerStripGain {
-        /// Target mixer node.
-        node_id: NodeId,
-        /// Strip index.
-        strip: usize,
-        /// Linear gain (0.0–2.0).
-        gain: f32,
-    },
-    /// Set a mixer strip's mute state
-    SetMixerStripMute {
-        /// Target mixer node.
-        node_id: NodeId,
-        /// Strip index.
-        strip: usize,
-        /// Whether muted.
-        muted: bool,
-    },
-    /// Set a mixer node's master gain
-    SetMixerMasterGain {
-        /// Target mixer node.
-        node_id: NodeId,
-        /// Linear gain (0.0–2.0).
-        gain: f32,
-    },
-    /// Set a mixer node's master mute state
-    SetMixerMasterMute {
-        /// Target mixer node.
-        node_id: NodeId,
-        /// Whether muted.
-        muted: bool,
-    },
+    // Note: mixer strip/master gain/mute commands are handled entirely through
+    // MixerNodeManager methods in the app layer, not through AppCommand.
 
     // Connection
     /// Disconnect from PipeWire
@@ -143,13 +112,7 @@ impl AppCommand {
             Self::CreateMixerNode { .. } | Self::RemoveMixerNode { .. } => {
                 safety.check_create_link()
             }
-            // Mixer strip/master gain follows volume change rules
-            Self::SetMixerStripGain { .. } | Self::SetMixerMasterGain { .. } => {
-                safety.check_volume_change()
-            }
-            Self::SetMixerStripMute { .. } | Self::SetMixerMasterMute { .. } => {
-                safety.check_mute_toggle()
-            }
+
             // These are always allowed
             Self::Disconnect | Self::StartAllMeters | Self::StopAllMeters => {
                 SafetyCheckResult::Allowed

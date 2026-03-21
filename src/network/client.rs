@@ -424,12 +424,7 @@ impl RemoteConnection {
                 },
             )),
             // Mixer node commands are local-only (not networked)
-            AppCommand::CreateMixerNode { .. }
-            | AppCommand::RemoveMixerNode { .. }
-            | AppCommand::SetMixerStripGain { .. }
-            | AppCommand::SetMixerStripMute { .. }
-            | AppCommand::SetMixerMasterGain { .. }
-            | AppCommand::SetMixerMasterMute { .. } => None,
+            AppCommand::CreateMixerNode { .. } | AppCommand::RemoveMixerNode { .. } => None,
             // These commands don't go through the network
             AppCommand::Disconnect | AppCommand::StartAllMeters | AppCommand::StopAllMeters => None,
         };
