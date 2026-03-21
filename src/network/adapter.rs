@@ -249,6 +249,8 @@ pub fn event_to_proto(event: &PwEvent, sequence: u64, timestamp_ms: u64) -> Opti
         PwEvent::ClientAdded(_) | PwEvent::DeviceAdded(_) => None,
         // Volume control failures are local UI feedback, not network events
         PwEvent::VolumeControlFailed(_, _) => None,
+        // Mixer node events are local, not exposed via network
+        PwEvent::MixerNodeCreated { .. } => None,
     };
 
     event_payload.map(|e| proto::Event {

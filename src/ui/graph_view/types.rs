@@ -124,4 +124,8 @@ pub struct GraphViewResponse {
     pub open_group_mixer: Option<GroupId>,
     /// Request to open the detailed mixer for a single node
     pub open_node_mixer: Option<NodeId>,
+    /// Request to open the mixer node view for a pipeflow-managed mixer
+    pub open_mixer_node: Option<NodeId>,
+    /// Request to open the create-mixer-node dialog
+    pub create_mixer_node: bool,
 }

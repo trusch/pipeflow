@@ -186,6 +186,8 @@ impl PipeflowApp {
         let mut volume_changed = false;
         let mut volume_control_issues: Vec<(crate::util::id::NodeId, String)> = Vec::new();
         let mut resolved_volume_issue_nodes: Vec<crate::util::id::NodeId> = Vec::new();
+        let mut pending_mixer_nodes: Vec<(String, u32)> = Vec::new();
+        let mut new_mixer_node_ids: Vec<(NodeId, String)> = Vec::new();
 
         for event in events {
             match event {
@@ -232,6 +234,10 @@ impl PipeflowApp {
                     tracing::error!("PipeWire error: {}", err);
                 }
                 PwEvent::NodeAdded(info) => {
+                    // Track mixer node names for post-loop registration
+                    if info.name.starts_with("pipeflow-mixer-") {
+                        new_mixer_node_ids.push((info.id, info.name.clone()));
+                    }
                     Self::handle_node_added(&mut state, info);
                 }
                 PwEvent::NodeRemoved(id) => {
@@ -348,6 +354,17 @@ impl PipeflowApp {
                         }
                     }
                 }
+                PwEvent::MixerNodeCreated { name, pid } => {
+                    tracing::info!(
+                        "Mixer node '{}' created (PID {}), will register when PW node appears",
+                        name,
+                        pid
+                    );
+                    // The actual NodeId assignment happens when the PipeWire
+                    // NodeAdded event arrives for the pipeflow-mixer-* node.
+                    // We store the PID in a pending map so we can associate it later.
+                    pending_mixer_nodes.push((name, pid));
+                }
                 _ => {}
             }
         }
@@ -375,6 +392,58 @@ impl PipeflowApp {
         // Start real metering after processing all events (only in local mode)
         if should_start_meters && !self.is_remote {
             self.set_real_metering(true);
+        }
+
+        // Register pending mixer nodes — these are nodes whose pw-loopback just
+        // spawned.  We store the (name, pid) so that when the PipeWire NodeAdded
+        // event arrives in a future frame, we can match by node.name prefix.
+        for (name, pid) in pending_mixer_nodes {
+            // Scan the graph for a node whose name matches "pipeflow-mixer-<name>"
+            let expected_node_name = format!("pipeflow-mixer-{}", name);
+            let state = self.state.read();
+            let node_id = state
+                .graph
+                .nodes
+                .values()
+                .find(|n| n.name == expected_node_name)
+                .map(|n| n.id);
+            drop(state);
+            if let Some(node_id) = node_id {
+                let input_count = 4; // default; we'll get the real count from the pending info
+                let mut mixer_state =
+                    crate::domain::mixer_node::MixerNodeState::new(name.clone(), input_count);
+                mixer_state.process_pid = Some(pid);
+                self.components
+                    .mixer_node_manager
+                    .insert(node_id, mixer_state);
+                tracing::info!("Registered mixer node '{}' as {:?}", name, node_id);
+            } else {
+                tracing::debug!(
+                    "Mixer node '{}' not yet in graph, will match on next NodeAdded",
+                    name
+                );
+            }
+        }
+
+        // Auto-register any pipeflow-mixer-* nodes that appeared in this frame
+        // but aren't already tracked by the mixer node manager.
+        for (node_id, node_name) in new_mixer_node_ids {
+            if !self.components.mixer_node_manager.is_mixer_node(&node_id) {
+                let display_name = node_name
+                    .strip_prefix("pipeflow-mixer-")
+                    .unwrap_or(&node_name)
+                    .to_string();
+                let mixer_state =
+                    crate::domain::mixer_node::MixerNodeState::new(display_name.clone(), 4);
+                self.components
+                    .mixer_node_manager
+                    .insert(node_id, mixer_state);
+                tracing::info!(
+                    "Auto-registered mixer node '{}' as {:?}",
+                    display_name,
+                    node_id
+                );
+            }
         }
     }
 

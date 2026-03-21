@@ -69,6 +69,51 @@ pub enum AppCommand {
         volume: f32,
     },
 
+    // Mixer node lifecycle
+    /// Create a mixer node (spawns a real PipeWire null-sink)
+    CreateMixerNode {
+        /// Display name for the mixer.
+        name: String,
+        /// Number of stereo input strips.
+        input_count: usize,
+    },
+    /// Remove a mixer node
+    RemoveMixerNode(NodeId),
+
+    // Mixer node control (app-level only — these do NOT reach PipeWire)
+    /// Set a mixer strip's gain
+    SetMixerStripGain {
+        /// Target mixer node.
+        node_id: NodeId,
+        /// Strip index.
+        strip: usize,
+        /// Linear gain (0.0–2.0).
+        gain: f32,
+    },
+    /// Set a mixer strip's mute state
+    SetMixerStripMute {
+        /// Target mixer node.
+        node_id: NodeId,
+        /// Strip index.
+        strip: usize,
+        /// Whether muted.
+        muted: bool,
+    },
+    /// Set a mixer node's master gain
+    SetMixerMasterGain {
+        /// Target mixer node.
+        node_id: NodeId,
+        /// Linear gain (0.0–2.0).
+        gain: f32,
+    },
+    /// Set a mixer node's master mute state
+    SetMixerMasterMute {
+        /// Target mixer node.
+        node_id: NodeId,
+        /// Whether muted.
+        muted: bool,
+    },
+
     // Connection
     /// Disconnect from PipeWire
     Disconnect,
@@ -89,6 +134,15 @@ impl AppCommand {
             Self::ToggleLink { .. } => safety.check_create_link(), // Same rules as create
             Self::SetVolume { .. } | Self::SetChannelVolume { .. } => safety.check_volume_change(),
             Self::SetMute { .. } => safety.check_mute_toggle(),
+            // Mixer node lifecycle follows the same rules as link creation
+            Self::CreateMixerNode { .. } | Self::RemoveMixerNode(_) => safety.check_create_link(),
+            // Mixer strip/master gain follows volume change rules
+            Self::SetMixerStripGain { .. } | Self::SetMixerMasterGain { .. } => {
+                safety.check_volume_change()
+            }
+            Self::SetMixerStripMute { .. } | Self::SetMixerMasterMute { .. } => {
+                safety.check_mute_toggle()
+            }
             // These are always allowed
             Self::Disconnect | Self::StartAllMeters | Self::StopAllMeters => {
                 SafetyCheckResult::Allowed

@@ -6,6 +6,7 @@
 use crate::core::state::GraphState;
 use crate::domain::graph::{Node, PortDirection};
 use crate::domain::groups::NodeGroup;
+use crate::domain::mixer_node::MixerNodeState;
 use crate::ui::theme::Theme;
 use crate::util::id::NodeId;
 use std::collections::HashMap;
@@ -22,6 +23,14 @@ pub struct MixerViewResponse {
     pub volume_changes: Vec<(NodeId, f32)>,
     pub channel_volume_changes: Vec<(NodeId, usize, f32)>,
     pub mute_toggles: Vec<NodeId>,
+    /// Mixer node: strip gain changes (strip_index, gain)
+    pub strip_gain_changes: Vec<(usize, f32)>,
+    /// Mixer node: strip mute toggles (strip_index, muted)
+    pub strip_mute_toggles: Vec<(usize, bool)>,
+    /// Mixer node: master gain change
+    pub master_gain_change: Option<f32>,
+    /// Mixer node: master mute toggle
+    pub master_mute_toggle: Option<bool>,
 }
 
 struct MixerStrip {
@@ -954,6 +963,167 @@ impl MixerView {
                     ui.add_space(6.0);
                 }
             });
+    }
+
+    /// Renders the mixer-node view (graph-native mixer created by pipeflow).
+    pub fn show_mixer_node(
+        &mut self,
+        ui: &mut egui::Ui,
+        _graph: &GraphState,
+        mixer_state: &MixerNodeState,
+        theme: &Theme,
+    ) -> MixerViewResponse {
+        let mut response = MixerViewResponse::default();
+
+        // Header
+        ui.horizontal(|ui| {
+            if ui.button("← Back").clicked() {
+                response.back_to_graph = true;
+            }
+            ui.add_space(12.0);
+            ui.heading(&mixer_state.name);
+            ui.label(
+                egui::RichText::new("Mixer Node")
+                    .color(theme.text.accent)
+                    .size(12.0),
+            );
+        });
+        ui.separator();
+
+        // Strips area — horizontal scroll
+        egui::ScrollArea::horizontal()
+            .id_salt("mixer_node_strips")
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    // Input strips
+                    for (i, strip) in mixer_state.strips.iter().enumerate() {
+                        let strip_id = ui.id().with(("mixer_strip", i));
+                        egui::Frame::NONE
+                            .fill(theme.background.secondary)
+                            .stroke(egui::Stroke::new(1.0, theme.background.grid))
+                            .corner_radius(6)
+                            .inner_margin(egui::Margin::same(8))
+                            .show(ui, |ui| {
+                                ui.set_width(MIXER_STRIP_WIDTH);
+                                ui.set_min_height(MIXER_CARD_HEIGHT);
+
+                                ui.vertical(|ui| {
+                                    // Strip label
+                                    ui.label(egui::RichText::new(&strip.label).strong().size(13.0));
+                                    ui.add_space(4.0);
+
+                                    // Mute button
+                                    let mute_text = if strip.muted { "M" } else { "M" };
+                                    let mute_color = if strip.muted {
+                                        egui::Color32::from_rgb(220, 80, 80)
+                                    } else {
+                                        theme.text.primary
+                                    };
+                                    if ui
+                                        .button(
+                                            egui::RichText::new(mute_text)
+                                                .color(mute_color)
+                                                .strong(),
+                                        )
+                                        .clicked()
+                                    {
+                                        response.strip_mute_toggles.push((i, !strip.muted));
+                                    }
+
+                                    ui.add_space(8.0);
+
+                                    // Gain fader (vertical slider)
+                                    let mut gain = strip.gain;
+                                    let slider = egui::Slider::new(&mut gain, 0.0..=2.0)
+                                        .vertical()
+                                        .custom_formatter(|v, _| {
+                                            if v <= 0.0001 {
+                                                "−∞".to_string()
+                                            } else {
+                                                format!("{:+.1}", 20.0 * (v as f32).log10())
+                                            }
+                                        });
+                                    let slider_response =
+                                        ui.add_sized([40.0, MIXER_FADER_HEIGHT], slider);
+                                    if slider_response.changed() {
+                                        response.strip_gain_changes.push((i, gain));
+                                    }
+
+                                    ui.add_space(4.0);
+                                    ui.label(
+                                        egui::RichText::new(Self::format_db(strip.gain)).size(10.0),
+                                    );
+                                });
+                            });
+                        ui.add_space(MIXER_STRIP_GAP);
+                    }
+
+                    // Master strip separator
+                    ui.separator();
+                    ui.add_space(MIXER_STRIP_GAP);
+
+                    // Master strip
+                    egui::Frame::NONE
+                        .fill(theme.background.secondary)
+                        .stroke(egui::Stroke::new(2.0, theme.text.accent))
+                        .corner_radius(6)
+                        .inner_margin(egui::Margin::same(8))
+                        .show(ui, |ui| {
+                            ui.set_width(MIXER_STRIP_WIDTH);
+                            ui.set_min_height(MIXER_CARD_HEIGHT);
+
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    egui::RichText::new("MASTER")
+                                        .strong()
+                                        .size(14.0)
+                                        .color(theme.text.accent),
+                                );
+                                ui.add_space(4.0);
+
+                                // Master mute
+                                let mute_color = if mixer_state.master_muted {
+                                    egui::Color32::from_rgb(220, 80, 80)
+                                } else {
+                                    theme.text.primary
+                                };
+                                if ui
+                                    .button(egui::RichText::new("M").color(mute_color).strong())
+                                    .clicked()
+                                {
+                                    response.master_mute_toggle = Some(!mixer_state.master_muted);
+                                }
+
+                                ui.add_space(8.0);
+
+                                // Master fader
+                                let mut master_gain = mixer_state.master_gain;
+                                let slider = egui::Slider::new(&mut master_gain, 0.0..=2.0)
+                                    .vertical()
+                                    .custom_formatter(|v, _| {
+                                        if v <= 0.0001 {
+                                            "−∞".to_string()
+                                        } else {
+                                            format!("{:+.1}", 20.0 * (v as f32).log10())
+                                        }
+                                    });
+                                let slider_response =
+                                    ui.add_sized([40.0, MIXER_FADER_HEIGHT], slider);
+                                if slider_response.changed() {
+                                    response.master_gain_change = Some(master_gain);
+                                }
+
+                                ui.add_space(4.0);
+                                ui.label(
+                                    egui::RichText::new(Self::format_db(mixer_state.master_gain))
+                                        .size(10.0),
+                                );
+                            });
+                        });
+                });
+            });
+
+        response
     }
 
     fn format_db(volume: f32) -> String {

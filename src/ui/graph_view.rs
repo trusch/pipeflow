@@ -806,11 +806,10 @@ impl GraphView {
                     response.snap_to_grid = Some(None); // None = all nodes
                     ui.close();
                 }
-                ui.add_enabled_ui(false, |ui| {
-                    ui.button("Insert Mixer Node… (planned)").on_hover_text(
-                        "Planned graph-native mixer node. See docs/mixer-node-architecture.md.",
-                    );
-                });
+                if ui.button("Insert Mixer Node…").clicked() {
+                    response.create_mixer_node = true;
+                    ui.close();
+                }
             }
         }
     }
@@ -1255,8 +1254,14 @@ impl GraphView {
         let max_text_width = (node_width - 8.0) * self.zoom; // Leave padding
         let truncated_name =
             ui.fonts_mut(|fonts| truncate_text_measured(name, max_text_width, &font_id, fonts));
-        // Prepend media class icon if available
-        let display_text = if let Some(icon) = media_class_icon(node.media_class.as_ref()) {
+        // Prepend media class icon if available (mixer nodes get a special icon)
+        let display_text = if node.name.starts_with("pipeflow-mixer-") {
+            format!(
+                "{} {}",
+                egui_phosphor::regular::SLIDERS_HORIZONTAL,
+                truncated_name
+            )
+        } else if let Some(icon) = media_class_icon(node.media_class.as_ref()) {
             format!("{} {}", icon, truncated_name)
         } else {
             truncated_name
@@ -1428,7 +1433,17 @@ impl GraphView {
             ui.close();
         }
 
-        if ui.button("Open Node Mixer").clicked() {
+        // Show "Open Mixer" for pipeflow-managed mixer nodes, otherwise "Open Node Mixer"
+        let is_pipeflow_mixer = graph
+            .get_node(&node_id)
+            .map(|n| n.name.starts_with("pipeflow-mixer-"))
+            .unwrap_or(false);
+        if is_pipeflow_mixer {
+            if ui.button("Open Mixer").clicked() {
+                response.open_mixer_node = Some(node_id);
+                ui.close();
+            }
+        } else if ui.button("Open Node Mixer").clicked() {
             response.open_node_mixer = Some(node_id);
             ui.close();
         }

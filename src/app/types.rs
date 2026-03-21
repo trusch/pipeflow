@@ -1,5 +1,6 @@
 //! Shared app-local types and UI component wiring.
 
+use crate::app::mixer_nodes::MixerNodeManager;
 use crate::core::commands::CommandRegistry;
 use crate::core::config::Config;
 use crate::core::history::UndoStack;
@@ -43,6 +44,7 @@ pub(crate) enum CenterViewMode {
     Graph,
     GroupMixer(GroupId),
     NodeMixer(NodeId),
+    MixerNode(NodeId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +107,41 @@ pub(super) struct PersistentIssue {
     pub(super) detail: Option<String>,
 }
 
+/// State for the "Create Mixer Node" dialog.
+#[derive(Debug)]
+pub(crate) struct CreateMixerNodeDialog {
+    /// Whether the dialog is open.
+    pub open: bool,
+    /// Name input.
+    pub name: String,
+    /// Number of stereo input strips (2–16).
+    pub input_count: usize,
+}
+
+impl Default for CreateMixerNodeDialog {
+    fn default() -> Self {
+        Self {
+            open: false,
+            name: "Mixer".to_string(),
+            input_count: 4,
+        }
+    }
+}
+
+impl CreateMixerNodeDialog {
+    /// Opens the dialog with defaults.
+    pub fn open(&mut self) {
+        self.open = true;
+        self.name = "Mixer".to_string();
+        self.input_count = 4;
+    }
+
+    /// Closes the dialog.
+    pub fn close(&mut self) {
+        self.open = false;
+    }
+}
+
 /// UI components and transient state.
 ///
 /// Groups UI-related fields to reduce the size of `PipeflowApp`
@@ -149,6 +186,8 @@ pub(crate) struct AppComponents {
     // --- Dialogs ---
     /// Rename node dialog state
     pub rename_dialog: RenameNodeDialog,
+    /// Create mixer node dialog state
+    pub create_mixer_dialog: CreateMixerNodeDialog,
 
     // --- Status ---
     /// Transient status message: (message, timestamp, is_error)
@@ -173,6 +212,10 @@ pub(crate) struct AppComponents {
     pub active_workspace: WorkspaceSection,
     /// Current central view mode
     pub center_view: CenterViewMode,
+
+    // --- Mixer nodes ---
+    /// Manager for pipeflow-created mixer nodes
+    pub mixer_node_manager: MixerNodeManager,
 }
 
 impl AppComponents {
@@ -205,6 +248,7 @@ impl AppComponents {
             needs_layout_save: false,
             undo_stack: UndoStack::default(),
             rename_dialog: RenameNodeDialog::default(),
+            create_mixer_dialog: CreateMixerNodeDialog::default(),
             status_message: None,
             persistent_issues: Vec::new(),
             last_layout_save: std::time::Instant::now(),
@@ -213,6 +257,7 @@ impl AppComponents {
             right_sidebar: SidebarState::default(),
             active_workspace: WorkspaceSection::Patch,
             center_view: CenterViewMode::Graph,
+            mixer_node_manager: MixerNodeManager::new(),
         }
     }
 }

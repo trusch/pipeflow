@@ -45,6 +45,15 @@ pub enum PwEvent {
     /// Volume control failed (node_id, error_message)
     VolumeControlFailed(NodeId, String),
 
+    // Mixer node events
+    /// A mixer node was created by pipeflow (pw-loopback spawned)
+    MixerNodeCreated {
+        /// Display name
+        name: String,
+        /// PID of the spawned pw-loopback process
+        pid: u32,
+    },
+
     // Meter events (high frequency)
     /// Batch meter update (variant matched but never constructed via this channel)
     #[allow(dead_code)]

@@ -257,7 +257,9 @@ impl PipeflowApp {
             if input.key_pressed(egui::Key::Escape) {
                 if matches!(
                     self.components.center_view,
-                    CenterViewMode::GroupMixer(_) | CenterViewMode::NodeMixer(_)
+                    CenterViewMode::GroupMixer(_)
+                        | CenterViewMode::NodeMixer(_)
+                        | CenterViewMode::MixerNode(_)
                 ) {
                     self.components.center_view = CenterViewMode::Graph;
                 } else {

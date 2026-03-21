@@ -192,6 +192,8 @@ struct PwRuntimeState {
     next_link_id: u32,
     /// Bound node proxies for volume/mute control
     node_proxies: HashMap<NodeId, NodeProxyHandle>,
+    /// PIDs of spawned mixer-node processes (pw-loopback)
+    mixer_node_pids: HashMap<String, u32>,
 }
 
 impl PwRuntimeState {
@@ -201,6 +203,7 @@ impl PwRuntimeState {
             // Start at a high ID to avoid conflicts with PipeWire's IDs
             next_link_id: 1_000_000,
             node_proxies: HashMap::new(),
+            mixer_node_pids: HashMap::new(),
         }
     }
 
@@ -1096,6 +1099,88 @@ fn handle_command(
             set_node_volume(&node_id, &vol_control, event_tx);
 
             let _ = event_tx.send(PwEvent::VolumeChanged(node_id, vol_control));
+        }
+        AppCommand::CreateMixerNode { name, input_count } => {
+            tracing::info!("Creating mixer node '{}' with {} inputs", name, input_count);
+            let node_name = format!("pipeflow-mixer-{}", name);
+            // Stereo channels per strip means total channels = input_count * 2
+            let channel_count = input_count * 2;
+            // Use pw-loopback to create a null sink with the right channel count.
+            // pw-loopback creates a virtual sink that appears in the graph.
+            match std::process::Command::new("pw-loopback")
+                .args([
+                    &format!("--capture-props=media.class=Audio/Sink"),
+                    &format!("--capture-props=node.name={}", node_name),
+                    &format!("--capture-props=node.description={}", name),
+                    &format!("--capture-props=audio.channels={}", channel_count.max(2)),
+                    &format!("--playback-props=node.name={}-out", node_name),
+                    &format!("--playback-props=node.description={} Output", name),
+                    &format!("--playback-props=media.class=Audio/Source"),
+                ])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            {
+                Ok(child) => {
+                    let pid = child.id();
+                    tracing::info!("Spawned pw-loopback for mixer '{}' (PID {})", name, pid);
+                    state.mixer_node_pids.insert(node_name, pid);
+                    let _ = event_tx.send(PwEvent::MixerNodeCreated {
+                        name: name.clone(),
+                        pid,
+                    });
+                }
+                Err(e) => {
+                    tracing::error!("Failed to spawn pw-loopback for mixer '{}': {}", name, e);
+                    let _ = event_tx.send(PwEvent::Error(crate::pipewire::events::PwError {
+                        code: -1,
+                        message: format!("Failed to create mixer node '{}': {}", name, e),
+                    }));
+                }
+            }
+        }
+        AppCommand::RemoveMixerNode(node_id) => {
+            tracing::info!("Removing mixer node {:?}", node_id);
+            // Kill all mixer node processes — we kill by stored PIDs.
+            // In practice, pipeflow tracks which name maps to which PW node ID
+            // in the app layer's MixerNodeManager, so the caller resolves the
+            // name → NodeId mapping before sending this command.
+            let mut killed = false;
+            let pids_snapshot: Vec<(String, u32)> = state
+                .mixer_node_pids
+                .iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect();
+            for (name, pid) in &pids_snapshot {
+                tracing::info!("Killing mixer node '{}' (PID {})", name, pid);
+                let _ = std::process::Command::new("kill")
+                    .arg(pid.to_string())
+                    .status();
+                state.mixer_node_pids.remove(name);
+                killed = true;
+                // Only kill one — the caller specifies one node at a time
+                break;
+            }
+            if !killed {
+                // Fallback: try to destroy via registry using the raw node ID
+                let global_id = node_id.raw();
+                tracing::info!(
+                    "No PID found for mixer node {:?}, destroying via registry (ID {})",
+                    node_id,
+                    global_id
+                );
+                registry.destroy_global(global_id);
+            }
+        }
+        // Mixer strip/master commands are app-level only; they don't reach PipeWire.
+        AppCommand::SetMixerStripGain { .. }
+        | AppCommand::SetMixerStripMute { .. }
+        | AppCommand::SetMixerMasterGain { .. }
+        | AppCommand::SetMixerMasterMute { .. } => {
+            // These are handled entirely in the app layer (MixerNodeManager).
+            // They should not be sent to the PipeWire thread, but if they arrive
+            // here we just ignore them.
         }
         AppCommand::Disconnect => {
             tracing::info!("Disconnect requested, stopping all meter streams");

@@ -11,6 +11,7 @@ pub mod explain;
 pub mod filters;
 pub mod graph;
 pub mod groups;
+pub mod mixer_node;
 pub mod rules;
 pub mod safety;
 pub mod snapshots;

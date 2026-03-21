@@ -14,6 +14,7 @@ mod command_handling;
 mod event_processing;
 mod feedback;
 mod initialization;
+pub(crate) mod mixer_nodes;
 mod snapshots;
 mod types;
 mod ui_panels;
@@ -301,6 +302,9 @@ impl PipeflowApp {
 
         // Rename node dialog
         self.render_rename_dialog(ctx);
+
+        // Create mixer node dialog
+        self.render_create_mixer_node_dialog(ctx);
     }
 
     /// Renders the rename node dialog.
@@ -366,6 +370,56 @@ impl PipeflowApp {
             self.components.rename_dialog.close();
         } else if should_close {
             self.components.rename_dialog.close();
+        }
+    }
+
+    /// Renders the "Create Mixer Node" dialog.
+    fn render_create_mixer_node_dialog(&mut self, ctx: &egui::Context) {
+        if !self.components.create_mixer_dialog.open {
+            return;
+        }
+
+        let mut should_create = false;
+        let mut should_close = false;
+
+        egui::Window::new("Create Mixer Node")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    ui.label("Name:");
+                    ui.text_edit_singleline(&mut self.components.create_mixer_dialog.name);
+
+                    ui.add_space(8.0);
+                    ui.label("Input strips:");
+                    ui.add(
+                        egui::Slider::new(
+                            &mut self.components.create_mixer_dialog.input_count,
+                            2..=16,
+                        )
+                        .text("strips"),
+                    );
+
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Create").clicked() {
+                            should_create = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            should_close = true;
+                        }
+                    });
+                });
+            });
+
+        if should_create {
+            let name = self.components.create_mixer_dialog.name.clone();
+            let input_count = self.components.create_mixer_dialog.input_count;
+            self.handle_app_command(AppCommand::CreateMixerNode { name, input_count });
+            self.components.create_mixer_dialog.close();
+        } else if should_close {
+            self.components.create_mixer_dialog.close();
         }
     }
 
@@ -1117,6 +1171,7 @@ impl PipeflowApp {
             CenterViewMode::Graph => self.render_graph_view(ctx),
             CenterViewMode::GroupMixer(group_id) => self.render_group_mixer_view(ctx, group_id),
             CenterViewMode::NodeMixer(node_id) => self.render_node_mixer_view(ctx, node_id),
+            CenterViewMode::MixerNode(node_id) => self.render_mixer_node_view(ctx, node_id),
         }
     }
 
@@ -1256,6 +1311,59 @@ impl PipeflowApp {
             }
             for (node_id, channel, volume) in response.channel_volume_changes {
                 self.handle_channel_volume_change(node_id, channel, volume);
+            }
+        });
+    }
+
+    fn render_mixer_node_view(&mut self, ctx: &egui::Context, node_id: crate::util::id::NodeId) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let mixer_state = self.components.mixer_node_manager.get(&node_id).cloned();
+            if let Some(mixer_state) = mixer_state {
+                let state = self.state.read();
+                let response = self.components.mixer_view.show_mixer_node(
+                    ui,
+                    &state.graph,
+                    &mixer_state,
+                    &self.components.theme,
+                );
+                drop(state);
+
+                if response.back_to_graph {
+                    self.components.center_view = CenterViewMode::Graph;
+                }
+
+                // Handle mixer-node-specific commands
+                for (strip, gain) in response.strip_gain_changes {
+                    self.components
+                        .mixer_node_manager
+                        .set_strip_gain(&node_id, strip, gain);
+                }
+                for (strip, muted) in response.strip_mute_toggles {
+                    self.components
+                        .mixer_node_manager
+                        .set_strip_mute(&node_id, strip, muted);
+                }
+                if let Some(gain) = response.master_gain_change {
+                    self.components
+                        .mixer_node_manager
+                        .set_master_gain(&node_id, gain);
+                    // Also apply to the actual PipeWire node volume
+                    self.handle_volume_change(node_id, gain);
+                }
+                if let Some(muted) = response.master_mute_toggle {
+                    self.components
+                        .mixer_node_manager
+                        .set_master_mute(&node_id, muted);
+                    // Also apply to the actual PipeWire node
+                    self.handle_mute_toggle(node_id);
+                }
+            } else {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.heading("That mixer node no longer exists");
+                    ui.label("Return to the patch view.");
+                });
+                self.components.center_view = CenterViewMode::Graph;
             }
         });
     }
@@ -1535,6 +1643,14 @@ impl PipeflowApp {
 
         if let Some(node_id) = response.open_node_mixer {
             self.components.center_view = CenterViewMode::NodeMixer(node_id);
+        }
+
+        if let Some(node_id) = response.open_mixer_node {
+            self.components.center_view = CenterViewMode::MixerNode(node_id);
+        }
+
+        if response.create_mixer_node {
+            self.components.create_mixer_dialog.open();
         }
     }
 
