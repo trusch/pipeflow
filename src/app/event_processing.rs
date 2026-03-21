@@ -186,7 +186,7 @@ impl PipeflowApp {
         let mut volume_changed = false;
         let mut volume_control_issues: Vec<(crate::util::id::NodeId, String)> = Vec::new();
         let mut resolved_volume_issue_nodes: Vec<crate::util::id::NodeId> = Vec::new();
-        let mut pending_mixer_nodes: Vec<(String, u32)> = Vec::new();
+        let mut pending_mixer_nodes: Vec<(String, u32, usize)> = Vec::new();
         let mut new_mixer_node_ids: Vec<(NodeId, String)> = Vec::new();
 
         for event in events {
@@ -354,16 +354,21 @@ impl PipeflowApp {
                         }
                     }
                 }
-                PwEvent::MixerNodeCreated { name, pid } => {
+                PwEvent::MixerNodeCreated {
+                    name,
+                    pid,
+                    input_count,
+                } => {
                     tracing::info!(
-                        "Mixer node '{}' created (PID {}), will register when PW node appears",
+                        "Mixer node '{}' created (PID {}, {} inputs), will register when PW node appears",
                         name,
-                        pid
+                        pid,
+                        input_count
                     );
                     // The actual NodeId assignment happens when the PipeWire
                     // NodeAdded event arrives for the pipeflow-mixer-* node.
                     // We store the PID in a pending map so we can associate it later.
-                    pending_mixer_nodes.push((name, pid));
+                    pending_mixer_nodes.push((name, pid, input_count));
                 }
                 _ => {}
             }
@@ -395,48 +400,51 @@ impl PipeflowApp {
         }
 
         // Register pending mixer nodes — these are nodes whose pw-loopback just
-        // spawned.  We store the (name, pid) so that when the PipeWire NodeAdded
-        // event arrives in a future frame, we can match by node.name prefix.
-        for (name, pid) in pending_mixer_nodes {
-            // Scan the graph for a node whose name matches "pipeflow-mixer-<name>"
-            let expected_node_name = format!("pipeflow-mixer-{}", name);
-            let state = self.state.read();
-            let node_id = state
-                .graph
-                .nodes
-                .values()
-                .find(|n| n.name == expected_node_name)
-                .map(|n| n.id);
-            drop(state);
-            if let Some(node_id) = node_id {
-                let input_count = 4; // default; we'll get the real count from the pending info
-                                     // Try to restore persisted state first
-                let persisted = super::mixer_persistence::load_persisted_mixer_nodes();
-                let mixer_state = if let Some(saved) = persisted.nodes.get(&name) {
-                    let mut s = saved.clone();
-                    s.process_pid = Some(pid);
-                    s
+        // spawned.  We store the (name, pid, input_count) so that when the
+        // PipeWire NodeAdded event arrives in a future frame, we can match by
+        // node.name prefix.
+        if !pending_mixer_nodes.is_empty() {
+            let persisted = super::mixer_persistence::load_persisted_mixer_nodes();
+            for (name, pid, input_count) in pending_mixer_nodes {
+                // Scan the graph for a node whose name matches "pipeflow-mixer-<name>"
+                let expected_node_name = format!("pipeflow-mixer-{}", name);
+                let state = self.state.read();
+                let node_id = state
+                    .graph
+                    .nodes
+                    .values()
+                    .find(|n| n.name == expected_node_name)
+                    .map(|n| n.id);
+                drop(state);
+                if let Some(node_id) = node_id {
+                    let mixer_state = if let Some(saved) = persisted.nodes.get(&name) {
+                        let mut s = saved.clone();
+                        s.process_pid = Some(pid);
+                        s
+                    } else {
+                        let mut s = crate::domain::mixer_node::MixerNodeState::new(
+                            name.clone(),
+                            input_count,
+                        );
+                        s.process_pid = Some(pid);
+                        s
+                    };
+                    self.components
+                        .mixer_node_manager
+                        .insert(node_id, mixer_state);
+                    // Persist after registration
+                    if let Err(e) = super::mixer_persistence::save_mixer_node_states(
+                        &self.components.mixer_node_manager,
+                    ) {
+                        tracing::warn!("Failed to save mixer node state: {}", e);
+                    }
+                    tracing::info!("Registered mixer node '{}' as {:?}", name, node_id);
                 } else {
-                    let mut s =
-                        crate::domain::mixer_node::MixerNodeState::new(name.clone(), input_count);
-                    s.process_pid = Some(pid);
-                    s
-                };
-                self.components
-                    .mixer_node_manager
-                    .insert(node_id, mixer_state);
-                // Persist after registration
-                if let Err(e) = super::mixer_persistence::save_mixer_node_states(
-                    &self.components.mixer_node_manager,
-                ) {
-                    tracing::warn!("Failed to save mixer node state: {}", e);
+                    tracing::debug!(
+                        "Mixer node '{}' not yet in graph, will match on next NodeAdded",
+                        name
+                    );
                 }
-                tracing::info!("Registered mixer node '{}' as {:?}", name, node_id);
-            } else {
-                tracing::debug!(
-                    "Mixer node '{}' not yet in graph, will match on next NodeAdded",
-                    name
-                );
             }
         }
 
@@ -444,14 +452,14 @@ impl PipeflowApp {
         // but aren't already tracked by the mixer node manager.
         // Try to restore persisted state if available.
         if !new_mixer_node_ids.is_empty() {
-            let persisted = super::mixer_persistence::load_persisted_mixer_nodes();
+            let auto_persisted = super::mixer_persistence::load_persisted_mixer_nodes();
             for (node_id, node_name) in new_mixer_node_ids {
                 if !self.components.mixer_node_manager.is_mixer_node(&node_id) {
                     let display_name = node_name
                         .strip_prefix("pipeflow-mixer-")
                         .unwrap_or(&node_name)
                         .to_string();
-                    let mixer_state = if let Some(saved) = persisted.nodes.get(&display_name) {
+                    let mixer_state = if let Some(saved) = auto_persisted.nodes.get(&display_name) {
                         tracing::info!(
                             "Restoring persisted mixer node state for '{}' as {:?}",
                             display_name,

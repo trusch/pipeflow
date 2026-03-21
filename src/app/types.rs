@@ -216,6 +216,10 @@ pub(crate) struct AppComponents {
     // --- Mixer nodes ---
     /// Manager for pipeflow-created mixer nodes
     pub mixer_node_manager: MixerNodeManager,
+    /// Whether mixer node state has been modified and needs saving.
+    pub mixer_state_dirty: bool,
+    /// Timestamp of the last mixer state change (for debounce).
+    pub mixer_state_last_change: Option<std::time::Instant>,
 }
 
 impl AppComponents {
@@ -258,6 +262,8 @@ impl AppComponents {
             active_workspace: WorkspaceSection::Patch,
             center_view: CenterViewMode::Graph,
             mixer_node_manager: MixerNodeManager::new(),
+            mixer_state_dirty: false,
+            mixer_state_last_change: None,
         }
     }
 }

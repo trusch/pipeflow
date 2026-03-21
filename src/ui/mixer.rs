@@ -9,7 +9,7 @@ use crate::domain::groups::NodeGroup;
 use crate::domain::mixer_node::MixerNodeState;
 use crate::ui::theme::Theme;
 use crate::util::id::NodeId;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Default)]
 pub struct MixerView {
@@ -80,6 +80,14 @@ impl MixerView {
         Self::default()
     }
 
+    /// Removes slider overrides for nodes that are no longer active.
+    pub fn cleanup_stale_overrides(&mut self, active_node_ids: &HashSet<NodeId>) {
+        self.slider_overrides
+            .retain(|id, _| active_node_ids.contains(id));
+        self.channel_slider_overrides
+            .retain(|(id, _), _| active_node_ids.contains(id));
+    }
+
     fn slider_value(&self, node_id: NodeId, backend_value: f32) -> f32 {
         self.slider_overrides
             .get(&node_id)
@@ -125,6 +133,7 @@ impl MixerView {
         theme: &Theme,
     ) -> MixerViewResponse {
         let mut response = MixerViewResponse::default();
+        self.cleanup_stale_overrides(&group.members);
         let strips = self.collect_group_strips(graph, group);
 
         egui::Frame::NONE
@@ -182,6 +191,8 @@ impl MixerView {
         theme: &Theme,
     ) -> MixerViewResponse {
         let mut response = MixerViewResponse::default();
+        let active: HashSet<NodeId> = [node.id].into_iter().collect();
+        self.cleanup_stale_overrides(&active);
         let Some(volume) = graph.volumes.get(&node.id) else {
             self.show_empty_state(
                 ui,
@@ -969,7 +980,6 @@ impl MixerView {
     pub fn show_mixer_node(
         &mut self,
         ui: &mut egui::Ui,
-        _graph: &GraphState,
         mixer_state: &MixerNodeState,
         theme: &Theme,
         strip_meters: &[f32],
@@ -977,173 +987,299 @@ impl MixerView {
     ) -> MixerViewResponse {
         let mut response = MixerViewResponse::default();
 
-        // Header
-        ui.horizontal(|ui| {
-            if ui.button("← Back").clicked() {
-                response.back_to_graph = true;
-            }
-            ui.add_space(12.0);
-            ui.heading(&mixer_state.name);
-            ui.label(
-                egui::RichText::new("Mixer Node")
-                    .color(theme.text.accent)
-                    .size(12.0),
-            );
-        });
-        ui.separator();
-
-        // Strips area — horizontal scroll
-        egui::ScrollArea::horizontal()
-            .id_salt("mixer_node_strips")
+        egui::Frame::NONE
+            .fill(egui::Color32::from_rgb(10, 12, 18))
+            .inner_margin(egui::Margin::same(20))
             .show(ui, |ui| {
+                // Header — unified with group/node mixer style
                 ui.horizontal(|ui| {
-                    // Input strips
-                    for (i, strip) in mixer_state.strips.iter().enumerate() {
-                        egui::Frame::NONE
-                            .fill(theme.background.secondary)
-                            .stroke(egui::Stroke::new(1.0, theme.background.grid))
-                            .corner_radius(6)
-                            .inner_margin(egui::Margin::same(8))
-                            .show(ui, |ui| {
-                                ui.set_width(MIXER_STRIP_WIDTH);
-                                ui.set_min_height(MIXER_CARD_HEIGHT);
-
-                                ui.vertical(|ui| {
-                                    // Strip label
-                                    ui.label(egui::RichText::new(&strip.label).strong().size(13.0));
-                                    ui.add_space(4.0);
-
-                                    // Mute button
-                                    let mute_text = if strip.muted { "M" } else { "M" };
-                                    let mute_color = if strip.muted {
-                                        egui::Color32::from_rgb(220, 80, 80)
-                                    } else {
-                                        theme.text.primary
-                                    };
-                                    if ui
-                                        .button(
-                                            egui::RichText::new(mute_text)
-                                                .color(mute_color)
-                                                .strong(),
-                                        )
-                                        .clicked()
-                                    {
-                                        response.strip_mute_toggles.push((i, !strip.muted));
-                                    }
-
-                                    ui.add_space(8.0);
-
-                                    // Gain fader + level meter side by side
-                                    ui.horizontal_top(|ui| {
-                                        let mut gain = strip.gain;
-                                        let slider = egui::Slider::new(&mut gain, 0.0..=2.0)
-                                            .vertical()
-                                            .custom_formatter(|v, _| {
-                                                if v <= 0.0001 {
-                                                    "−∞".to_string()
-                                                } else {
-                                                    format!("{:+.1}", 20.0 * (v as f32).log10())
-                                                }
-                                            });
-                                        let slider_response =
-                                            ui.add_sized([40.0, MIXER_FADER_HEIGHT], slider);
-                                        if slider_response.changed() {
-                                            response.strip_gain_changes.push((i, gain));
-                                        }
-
-                                        ui.add_space(6.0);
-                                        let meter_level =
-                                            strip_meters.get(i).copied().unwrap_or(0.0);
-                                        self.draw_level_meter(
-                                            ui,
-                                            meter_level,
-                                            strip.muted,
-                                            MIXER_FADER_HEIGHT,
-                                        );
-                                    });
-
-                                    ui.add_space(4.0);
-                                    ui.label(
-                                        egui::RichText::new(Self::format_db(strip.gain)).size(10.0),
-                                    );
-                                });
-                            });
-                        ui.add_space(MIXER_STRIP_GAP);
+                    let back = egui::Button::new(format!(
+                        "{} Back to Patch",
+                        egui_phosphor::regular::ARROW_LEFT
+                    ))
+                    .corner_radius(10)
+                    .fill(egui::Color32::from_rgb(28, 34, 48))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 90, 120)))
+                    .min_size(egui::vec2(150.0, 34.0));
+                    if ui.add(back).clicked() {
+                        response.back_to_graph = true;
                     }
 
-                    // Master strip separator
-                    ui.separator();
-                    ui.add_space(MIXER_STRIP_GAP);
-
-                    // Master strip
-                    egui::Frame::NONE
-                        .fill(theme.background.secondary)
-                        .stroke(egui::Stroke::new(2.0, theme.text.accent))
-                        .corner_radius(6)
-                        .inner_margin(egui::Margin::same(8))
-                        .show(ui, |ui| {
-                            ui.set_width(MIXER_STRIP_WIDTH);
-                            ui.set_min_height(MIXER_CARD_HEIGHT);
-
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    egui::RichText::new("MASTER")
-                                        .strong()
-                                        .size(14.0)
-                                        .color(theme.text.accent),
-                                );
-                                ui.add_space(4.0);
-
-                                // Master mute
-                                let mute_color = if mixer_state.master_muted {
-                                    egui::Color32::from_rgb(220, 80, 80)
-                                } else {
-                                    theme.text.primary
-                                };
-                                if ui
-                                    .button(egui::RichText::new("M").color(mute_color).strong())
-                                    .clicked()
-                                {
-                                    response.master_mute_toggle = Some(!mixer_state.master_muted);
-                                }
-
-                                ui.add_space(8.0);
-
-                                // Master fader + level meter
-                                ui.horizontal_top(|ui| {
-                                    let mut master_gain = mixer_state.master_gain;
-                                    let slider = egui::Slider::new(&mut master_gain, 0.0..=2.0)
-                                        .vertical()
-                                        .custom_formatter(|v, _| {
-                                            if v <= 0.0001 {
-                                                "−∞".to_string()
-                                            } else {
-                                                format!("{:+.1}", 20.0 * (v as f32).log10())
-                                            }
-                                        });
-                                    let slider_response =
-                                        ui.add_sized([40.0, MIXER_FADER_HEIGHT], slider);
-                                    if slider_response.changed() {
-                                        response.master_gain_change = Some(master_gain);
-                                    }
-
-                                    ui.add_space(6.0);
-                                    self.draw_level_meter(
-                                        ui,
-                                        master_meter,
-                                        mixer_state.master_muted,
-                                        MIXER_FADER_HEIGHT,
+                    ui.add_space(12.0);
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.heading(format!("{} Mixer Node", mixer_state.name));
+                            let chip_text = format!("{} strips", mixer_state.strip_count());
+                            egui::Frame::NONE
+                                .fill(egui::Color32::from_rgba_unmultiplied(90, 140, 220, 28))
+                                .stroke(egui::Stroke::new(
+                                    1.0,
+                                    egui::Color32::from_rgb(90, 140, 220),
+                                ))
+                                .corner_radius(255)
+                                .inner_margin(egui::Margin::symmetric(10, 4))
+                                .show(ui, |ui| {
+                                    ui.label(
+                                        egui::RichText::new(chip_text)
+                                            .color(theme.text.primary)
+                                            .strong(),
                                     );
                                 });
-
-                                ui.add_space(4.0);
-                                ui.label(
-                                    egui::RichText::new(Self::format_db(mixer_state.master_gain))
-                                        .size(10.0),
-                                );
-                            });
                         });
+                        ui.label(
+                            egui::RichText::new(
+                                "Graph-native mixer node created by pipeflow (pw-loopback).",
+                            )
+                            .color(theme.text.muted),
+                        );
+                    });
                 });
+                ui.add_space(18.0);
+
+                let top_space = ((ui.available_height() - MIXER_CARD_HEIGHT) * 0.35).max(0.0);
+                if top_space > 0.0 {
+                    ui.add_space(top_space);
+                }
+
+                // Strips area — horizontal scroll
+                egui::ScrollArea::horizontal()
+                    .id_salt("mixer_node_strips")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        let strip_count = mixer_state.strip_count() as f32 + 1.0; // +1 for master
+                        let content_width = strip_count * MIXER_STRIP_WIDTH
+                            + (strip_count - 1.0).max(0.0) * MIXER_STRIP_GAP;
+                        let leading_space = ((ui.available_width() - content_width) * 0.5).max(0.0);
+
+                        ui.horizontal_top(|ui| {
+                            if leading_space > 0.0 {
+                                ui.add_space(leading_space);
+                            }
+
+                            // Input strips
+                            for (i, strip) in mixer_state.strips.iter().enumerate() {
+                                let card_fill = egui::Color32::from_rgb(20, 24, 34);
+                                let card_stroke = if strip.muted {
+                                    egui::Color32::from_rgb(110, 70, 70)
+                                } else {
+                                    egui::Color32::from_rgb(52, 63, 86)
+                                };
+
+                                egui::Frame::NONE
+                                    .fill(card_fill)
+                                    .stroke(egui::Stroke::new(1.0, card_stroke))
+                                    .corner_radius(18)
+                                    .inner_margin(egui::Margin::symmetric(16, 16))
+                                    .show(ui, |ui| {
+                                        ui.set_width(MIXER_STRIP_WIDTH);
+                                        ui.allocate_ui_with_layout(
+                                            egui::vec2(MIXER_STRIP_WIDTH, MIXER_CARD_HEIGHT),
+                                            egui::Layout::top_down(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    egui::RichText::new(&strip.label)
+                                                        .strong()
+                                                        .size(16.0)
+                                                        .color(theme.text.primary),
+                                                );
+                                                ui.add_space(8.0);
+
+                                                ui.horizontal_top(|ui| {
+                                                    self.draw_db_scale(ui, theme);
+                                                    ui.add_space(8.0);
+
+                                                    let mut gain = strip.gain;
+                                                    let slider_size =
+                                                        egui::vec2(48.0, MIXER_FADER_HEIGHT);
+                                                    let slider =
+                                                        egui::Slider::new(&mut gain, 0.0..=2.0)
+                                                            .vertical()
+                                                            .show_value(false)
+                                                            .step_by(0.01)
+                                                            .trailing_fill(true)
+                                                            .handle_shape(
+                                                                egui::style::HandleShape::Rect {
+                                                                    aspect_ratio: 0.55,
+                                                                },
+                                                            );
+                                                    let resp = ui.add_sized(slider_size, slider);
+                                                    if resp.double_clicked() {
+                                                        gain = 1.0;
+                                                    }
+                                                    if resp.changed() || resp.double_clicked() {
+                                                        response.strip_gain_changes.push((i, gain));
+                                                    }
+
+                                                    ui.add_space(10.0);
+                                                    let meter_level =
+                                                        strip_meters.get(i).copied().unwrap_or(0.0);
+                                                    self.draw_level_meter(
+                                                        ui,
+                                                        meter_level,
+                                                        strip.muted,
+                                                        slider_size.y,
+                                                    );
+                                                });
+
+                                                ui.add_space(10.0);
+                                                ui.label(
+                                                    egui::RichText::new(Self::format_volume_pair(
+                                                        strip.gain,
+                                                    ))
+                                                    .monospace()
+                                                    .size(18.0)
+                                                    .strong(),
+                                                );
+                                                ui.add_space(8.0);
+
+                                                // Mute button
+                                                let mute_text = if strip.muted {
+                                                    format!(
+                                                        "{} Muted",
+                                                        egui_phosphor::regular::SPEAKER_SLASH
+                                                    )
+                                                } else {
+                                                    format!(
+                                                        "{} Mute",
+                                                        egui_phosphor::regular::SPEAKER_HIGH
+                                                    )
+                                                };
+                                                let mute_fill = if strip.muted {
+                                                    egui::Color32::from_rgb(120, 46, 46)
+                                                } else {
+                                                    egui::Color32::from_rgb(35, 42, 56)
+                                                };
+                                                if ui
+                                                    .add(
+                                                        egui::Button::new(mute_text)
+                                                            .fill(mute_fill)
+                                                            .corner_radius(10)
+                                                            .min_size(egui::vec2(112.0, 32.0)),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    response
+                                                        .strip_mute_toggles
+                                                        .push((i, !strip.muted));
+                                                }
+                                            },
+                                        );
+                                    });
+                                ui.add_space(MIXER_STRIP_GAP);
+                            }
+
+                            // Styled separator line between strips and master
+                            let sep_rect = ui.allocate_exact_size(
+                                egui::vec2(2.0, MIXER_CARD_HEIGHT + 32.0),
+                                egui::Sense::hover(),
+                            );
+                            ui.painter().rect_filled(
+                                sep_rect.0,
+                                1.0,
+                                egui::Color32::from_rgb(52, 63, 86),
+                            );
+                            ui.add_space(MIXER_STRIP_GAP);
+
+                            // Master strip
+                            egui::Frame::NONE
+                                .fill(egui::Color32::from_rgb(16, 20, 30))
+                                .stroke(egui::Stroke::new(2.0, theme.text.accent))
+                                .corner_radius(18)
+                                .inner_margin(egui::Margin::symmetric(16, 16))
+                                .show(ui, |ui| {
+                                    ui.set_width(MIXER_STRIP_WIDTH);
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(MIXER_STRIP_WIDTH, MIXER_CARD_HEIGHT),
+                                        egui::Layout::top_down(egui::Align::Center),
+                                        |ui| {
+                                            ui.label(
+                                                egui::RichText::new("MASTER")
+                                                    .strong()
+                                                    .size(16.0)
+                                                    .color(theme.text.accent),
+                                            );
+                                            ui.add_space(8.0);
+
+                                            ui.horizontal_top(|ui| {
+                                                self.draw_db_scale(ui, theme);
+                                                ui.add_space(8.0);
+
+                                                let mut master_gain = mixer_state.master_gain;
+                                                let slider_size =
+                                                    egui::vec2(48.0, MIXER_FADER_HEIGHT);
+                                                let slider =
+                                                    egui::Slider::new(&mut master_gain, 0.0..=2.0)
+                                                        .vertical()
+                                                        .show_value(false)
+                                                        .step_by(0.01)
+                                                        .trailing_fill(true)
+                                                        .handle_shape(
+                                                            egui::style::HandleShape::Rect {
+                                                                aspect_ratio: 0.55,
+                                                            },
+                                                        );
+                                                let resp = ui.add_sized(slider_size, slider);
+                                                if resp.double_clicked() {
+                                                    master_gain = 1.0;
+                                                }
+                                                if resp.changed() || resp.double_clicked() {
+                                                    response.master_gain_change = Some(master_gain);
+                                                }
+
+                                                ui.add_space(10.0);
+                                                self.draw_level_meter(
+                                                    ui,
+                                                    master_meter,
+                                                    mixer_state.master_muted,
+                                                    slider_size.y,
+                                                );
+                                            });
+
+                                            ui.add_space(10.0);
+                                            ui.label(
+                                                egui::RichText::new(Self::format_volume_pair(
+                                                    mixer_state.master_gain,
+                                                ))
+                                                .monospace()
+                                                .size(18.0)
+                                                .strong(),
+                                            );
+                                            ui.add_space(8.0);
+
+                                            // Master mute button
+                                            let mute_text = if mixer_state.master_muted {
+                                                format!(
+                                                    "{} Muted",
+                                                    egui_phosphor::regular::SPEAKER_SLASH
+                                                )
+                                            } else {
+                                                format!(
+                                                    "{} Mute",
+                                                    egui_phosphor::regular::SPEAKER_HIGH
+                                                )
+                                            };
+                                            let mute_fill = if mixer_state.master_muted {
+                                                egui::Color32::from_rgb(120, 46, 46)
+                                            } else {
+                                                egui::Color32::from_rgb(35, 42, 56)
+                                            };
+                                            if ui
+                                                .add(
+                                                    egui::Button::new(mute_text)
+                                                        .fill(mute_fill)
+                                                        .corner_radius(10)
+                                                        .min_size(egui::vec2(112.0, 32.0)),
+                                                )
+                                                .clicked()
+                                            {
+                                                response.master_mute_toggle =
+                                                    Some(!mixer_state.master_muted);
+                                            }
+                                        },
+                                    );
+                                });
+                        });
+                    });
             });
 
         response

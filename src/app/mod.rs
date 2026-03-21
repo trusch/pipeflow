@@ -417,6 +417,22 @@ impl PipeflowApp {
         if should_create {
             let name = self.components.create_mixer_dialog.name.clone();
             let input_count = self.components.create_mixer_dialog.input_count;
+
+            // Validate name uniqueness
+            let name_taken = self
+                .components
+                .mixer_node_manager
+                .iter()
+                .any(|(_, s)| s.name == name);
+            if name_taken {
+                self.set_status_message(
+                    &format!("A mixer node named '{}' already exists", name),
+                    true,
+                );
+                self.components.create_mixer_dialog.close();
+                return;
+            }
+
             self.handle_app_command(AppCommand::CreateMixerNode {
                 name: name.clone(),
                 input_count,
@@ -1361,7 +1377,6 @@ impl PipeflowApp {
 
                 let response = self.components.mixer_view.show_mixer_node(
                     ui,
-                    &state.graph,
                     &mixer_state,
                     &self.components.theme,
                     &strip_meters,
@@ -1390,9 +1405,19 @@ impl PipeflowApp {
                     self.components
                         .mixer_node_manager
                         .set_strip_mute(&node_id, strip, muted);
-                    // Apply mute to the linked source node
+                    // Apply mute to the linked source node — explicitly set to
+                    // the strip's new muted value to avoid desync with toggle.
                     if let Some(Some(source_id)) = strip_sources.get(strip) {
-                        self.handle_mute_toggle(*source_id);
+                        {
+                            let mut state = self.state.write();
+                            if let Some(vol) = state.graph.volumes.get_mut(source_id) {
+                                vol.muted = muted;
+                            }
+                        }
+                        self.handle_app_command(AppCommand::SetMute {
+                            node_id: *source_id,
+                            muted,
+                        });
                     }
                     state_changed = true;
                 }
@@ -1413,13 +1438,10 @@ impl PipeflowApp {
                     state_changed = true;
                 }
 
-                // Persist mixer state on any change
+                // Mark mixer state as dirty for debounced persistence
                 if state_changed {
-                    if let Err(e) = mixer_persistence::save_mixer_node_states(
-                        &self.components.mixer_node_manager,
-                    ) {
-                        tracing::warn!("Failed to save mixer node state: {}", e);
-                    }
+                    self.components.mixer_state_dirty = true;
+                    self.components.mixer_state_last_change = Some(std::time::Instant::now());
                 }
             } else {
                 ui.vertical_centered(|ui| {
@@ -1753,6 +1775,22 @@ impl PipeflowApp {
             self.save_layout();
             self.components.needs_layout_save = false;
             self.components.last_layout_save = std::time::Instant::now();
+        }
+
+        // Debounced mixer node state persistence (500ms after last change)
+        const MIXER_SAVE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(500);
+        if self.components.mixer_state_dirty {
+            if let Some(last_change) = self.components.mixer_state_last_change {
+                if last_change.elapsed() >= MIXER_SAVE_DEBOUNCE {
+                    if let Err(e) = mixer_persistence::save_mixer_node_states(
+                        &self.components.mixer_node_manager,
+                    ) {
+                        tracing::warn!("Failed to save mixer node state: {}", e);
+                    }
+                    self.components.mixer_state_dirty = false;
+                    self.components.mixer_state_last_change = None;
+                }
+            }
         }
     }
 

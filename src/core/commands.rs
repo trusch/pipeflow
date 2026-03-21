@@ -78,7 +78,12 @@ pub enum AppCommand {
         input_count: usize,
     },
     /// Remove a mixer node
-    RemoveMixerNode(NodeId),
+    RemoveMixerNode {
+        /// The PipeWire node ID.
+        node_id: NodeId,
+        /// Display name of the mixer (used to find the correct pw-loopback PID).
+        name: String,
+    },
 
     // Mixer node control (app-level only — these do NOT reach PipeWire)
     /// Set a mixer strip's gain
@@ -135,7 +140,9 @@ impl AppCommand {
             Self::SetVolume { .. } | Self::SetChannelVolume { .. } => safety.check_volume_change(),
             Self::SetMute { .. } => safety.check_mute_toggle(),
             // Mixer node lifecycle follows the same rules as link creation
-            Self::CreateMixerNode { .. } | Self::RemoveMixerNode(_) => safety.check_create_link(),
+            Self::CreateMixerNode { .. } | Self::RemoveMixerNode { .. } => {
+                safety.check_create_link()
+            }
             // Mixer strip/master gain follows volume change rules
             Self::SetMixerStripGain { .. } | Self::SetMixerMasterGain { .. } => {
                 safety.check_volume_change()

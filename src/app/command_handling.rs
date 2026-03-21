@@ -567,7 +567,10 @@ impl PipeflowApp {
                     .find(|(_, s)| s.name == state.name)
                     .map(|(id, _)| *id)
                     .unwrap_or(node_id);
-                self.handle_app_command(AppCommand::RemoveMixerNode(actual_id));
+                self.handle_app_command(AppCommand::RemoveMixerNode {
+                    node_id: actual_id,
+                    name: state.name.clone(),
+                });
                 self.components.mixer_node_manager.remove(&actual_id);
                 if let Err(e) = super::mixer_persistence::save_mixer_node_states(
                     &self.components.mixer_node_manager,

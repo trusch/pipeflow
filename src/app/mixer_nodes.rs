@@ -97,11 +97,11 @@ impl MixerNodeManager {
     /// Finds a mixer node by its PipeWire node name prefix.
     pub fn find_by_pw_name(&self, pw_name: &str) -> Option<NodeId> {
         // We identify mixer nodes by name prefix "pipeflow-mixer-"
-        if !pw_name.starts_with("pipeflow-mixer-") {
-            return None;
-        }
-        // Return first match (there should be at most one per name)
-        self.nodes.keys().find(|_| true).copied()
+        let display_name = pw_name.strip_prefix("pipeflow-mixer-")?;
+        self.nodes
+            .iter()
+            .find(|(_, state)| state.name == display_name)
+            .map(|(id, _)| *id)
     }
 
     /// Returns an iterator over all (node_id, state) pairs.

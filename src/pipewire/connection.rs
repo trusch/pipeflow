@@ -207,6 +207,16 @@ impl PwRuntimeState {
         }
     }
 
+    /// Kills all tracked mixer node (pw-loopback) processes.
+    fn cleanup_mixer_processes(&mut self) {
+        for (name, pid) in self.mixer_node_pids.drain() {
+            tracing::info!("Cleaning up mixer node '{}' (PID {})", name, pid);
+            let _ = std::process::Command::new("kill")
+                .arg(pid.to_string())
+                .status();
+        }
+    }
+
     /// Checks if a node proxy is bound.
     fn has_node_proxy(&self, node_id: &NodeId) -> bool {
         self.node_proxies.contains_key(node_id)
@@ -444,6 +454,16 @@ fn try_connect_and_run(
             handle_global_removed(&event_tx_for_remove, id);
         })
         .register();
+
+    // Ensure mixer processes are cleaned up when the PW thread exits
+    // (state is Rc<RefCell<..>> so we add a custom scope-based cleanup)
+    struct CleanupGuard(Rc<RefCell<PwRuntimeState>>);
+    impl Drop for CleanupGuard {
+        fn drop(&mut self) {
+            self.0.borrow_mut().cleanup_mixer_processes();
+        }
+    }
+    let _cleanup_guard = CleanupGuard(state.clone());
 
     // Main loop - run until stopped
     let loop_ = mainloop.loop_();
@@ -1160,6 +1180,7 @@ fn handle_command(
                     let _ = event_tx.send(PwEvent::MixerNodeCreated {
                         name: name.clone(),
                         pid,
+                        input_count,
                     });
                 }
                 Err(e) => {
@@ -1171,34 +1192,20 @@ fn handle_command(
                 }
             }
         }
-        AppCommand::RemoveMixerNode(node_id) => {
-            tracing::info!("Removing mixer node {:?}", node_id);
-            // Kill all mixer node processes — we kill by stored PIDs.
-            // In practice, pipeflow tracks which name maps to which PW node ID
-            // in the app layer's MixerNodeManager, so the caller resolves the
-            // name → NodeId mapping before sending this command.
-            let mut killed = false;
-            let pids_snapshot: Vec<(String, u32)> = state
-                .mixer_node_pids
-                .iter()
-                .map(|(k, v)| (k.clone(), *v))
-                .collect();
-            for (name, pid) in &pids_snapshot {
-                tracing::info!("Killing mixer node '{}' (PID {})", name, pid);
+        AppCommand::RemoveMixerNode { node_id, name } => {
+            tracing::info!("Removing mixer node {:?} (name='{}')", node_id, name);
+            let key = format!("pipeflow-mixer-{}", name);
+            if let Some(pid) = state.mixer_node_pids.remove(&key) {
+                tracing::info!("Killing mixer node '{}' (PID {})", key, pid);
                 let _ = std::process::Command::new("kill")
                     .arg(pid.to_string())
                     .status();
-                state.mixer_node_pids.remove(name);
-                killed = true;
-                // Only kill one — the caller specifies one node at a time
-                break;
-            }
-            if !killed {
+            } else {
                 // Fallback: try to destroy via registry using the raw node ID
                 let global_id = node_id.raw();
                 tracing::info!(
-                    "No PID found for mixer node {:?}, destroying via registry (ID {})",
-                    node_id,
+                    "No PID found for mixer node '{}', destroying via registry (ID {})",
+                    key,
                     global_id
                 );
                 registry.destroy_global(global_id);

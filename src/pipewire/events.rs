@@ -52,6 +52,8 @@ pub enum PwEvent {
         name: String,
         /// PID of the spawned pw-loopback process
         pid: u32,
+        /// Number of stereo input strips requested
+        input_count: usize,
     },
 
     // Meter events (high frequency)
