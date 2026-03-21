@@ -410,12 +410,27 @@ impl PipeflowApp {
             drop(state);
             if let Some(node_id) = node_id {
                 let input_count = 4; // default; we'll get the real count from the pending info
-                let mut mixer_state =
-                    crate::domain::mixer_node::MixerNodeState::new(name.clone(), input_count);
-                mixer_state.process_pid = Some(pid);
+                                     // Try to restore persisted state first
+                let persisted = super::mixer_persistence::load_persisted_mixer_nodes();
+                let mixer_state = if let Some(saved) = persisted.nodes.get(&name) {
+                    let mut s = saved.clone();
+                    s.process_pid = Some(pid);
+                    s
+                } else {
+                    let mut s =
+                        crate::domain::mixer_node::MixerNodeState::new(name.clone(), input_count);
+                    s.process_pid = Some(pid);
+                    s
+                };
                 self.components
                     .mixer_node_manager
                     .insert(node_id, mixer_state);
+                // Persist after registration
+                if let Err(e) = super::mixer_persistence::save_mixer_node_states(
+                    &self.components.mixer_node_manager,
+                ) {
+                    tracing::warn!("Failed to save mixer node state: {}", e);
+                }
                 tracing::info!("Registered mixer node '{}' as {:?}", name, node_id);
             } else {
                 tracing::debug!(
@@ -427,22 +442,34 @@ impl PipeflowApp {
 
         // Auto-register any pipeflow-mixer-* nodes that appeared in this frame
         // but aren't already tracked by the mixer node manager.
-        for (node_id, node_name) in new_mixer_node_ids {
-            if !self.components.mixer_node_manager.is_mixer_node(&node_id) {
-                let display_name = node_name
-                    .strip_prefix("pipeflow-mixer-")
-                    .unwrap_or(&node_name)
-                    .to_string();
-                let mixer_state =
-                    crate::domain::mixer_node::MixerNodeState::new(display_name.clone(), 4);
-                self.components
-                    .mixer_node_manager
-                    .insert(node_id, mixer_state);
-                tracing::info!(
-                    "Auto-registered mixer node '{}' as {:?}",
-                    display_name,
-                    node_id
-                );
+        // Try to restore persisted state if available.
+        if !new_mixer_node_ids.is_empty() {
+            let persisted = super::mixer_persistence::load_persisted_mixer_nodes();
+            for (node_id, node_name) in new_mixer_node_ids {
+                if !self.components.mixer_node_manager.is_mixer_node(&node_id) {
+                    let display_name = node_name
+                        .strip_prefix("pipeflow-mixer-")
+                        .unwrap_or(&node_name)
+                        .to_string();
+                    let mixer_state = if let Some(saved) = persisted.nodes.get(&display_name) {
+                        tracing::info!(
+                            "Restoring persisted mixer node state for '{}' as {:?}",
+                            display_name,
+                            node_id
+                        );
+                        saved.clone()
+                    } else {
+                        crate::domain::mixer_node::MixerNodeState::new(display_name.clone(), 4)
+                    };
+                    self.components
+                        .mixer_node_manager
+                        .insert(node_id, mixer_state);
+                    tracing::info!(
+                        "Auto-registered mixer node '{}' as {:?}",
+                        display_name,
+                        node_id
+                    );
+                }
             }
         }
     }

@@ -15,6 +15,7 @@ mod event_processing;
 mod feedback;
 mod initialization;
 pub(crate) mod mixer_nodes;
+pub(crate) mod mixer_persistence;
 mod snapshots;
 mod types;
 mod ui_panels;
@@ -416,7 +417,25 @@ impl PipeflowApp {
         if should_create {
             let name = self.components.create_mixer_dialog.name.clone();
             let input_count = self.components.create_mixer_dialog.input_count;
-            self.handle_app_command(AppCommand::CreateMixerNode { name, input_count });
+            self.handle_app_command(AppCommand::CreateMixerNode {
+                name: name.clone(),
+                input_count,
+            });
+            // Undo entry: we don't know the node ID yet (it arrives via PW event),
+            // so we record a CreateMixerNode forward action.  The reverse is
+            // a best-effort removal — the node ID will be resolved at undo time
+            // by scanning the mixer_node_manager for the matching name.
+            self.components.undo_stack.push(UndoEntry {
+                description: format!("Create mixer node '{}'", name),
+                forward: UndoAction::CreateMixerNode {
+                    name: name.clone(),
+                    input_count,
+                },
+                reverse: UndoAction::RemoveMixerNode {
+                    node_id: crate::util::id::NodeId::new(0), // placeholder
+                    state: crate::domain::mixer_node::MixerNodeState::new(name, input_count),
+                },
+            });
             self.components.create_mixer_dialog.close();
         } else if should_close {
             self.components.create_mixer_dialog.close();
@@ -1319,12 +1338,34 @@ impl PipeflowApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             let mixer_state = self.components.mixer_node_manager.get(&node_id).cloned();
             if let Some(mixer_state) = mixer_state {
+                // Collect per-strip source node IDs and meter data before rendering
                 let state = self.state.read();
+                let strip_sources: Vec<Option<crate::util::id::NodeId>> = (0..mixer_state
+                    .strip_count())
+                    .map(|i| mixer_nodes::find_source_node_for_strip(&state.graph, node_id, i))
+                    .collect();
+                let strip_meters: Vec<f32> = strip_sources
+                    .iter()
+                    .map(|src| {
+                        src.and_then(|nid| state.graph.meters.get(&nid))
+                            .map(|m| m.get_decayed_max_peak(std::time::Duration::from_millis(180)))
+                            .unwrap_or(0.0)
+                    })
+                    .collect();
+                let master_meter = state
+                    .graph
+                    .meters
+                    .get(&node_id)
+                    .map(|m| m.get_decayed_max_peak(std::time::Duration::from_millis(180)))
+                    .unwrap_or(0.0);
+
                 let response = self.components.mixer_view.show_mixer_node(
                     ui,
                     &state.graph,
                     &mixer_state,
                     &self.components.theme,
+                    &strip_meters,
+                    master_meter,
                 );
                 drop(state);
 
@@ -1332,16 +1373,28 @@ impl PipeflowApp {
                     self.components.center_view = CenterViewMode::Graph;
                 }
 
+                let mut state_changed = false;
+
                 // Handle mixer-node-specific commands
                 for (strip, gain) in response.strip_gain_changes {
                     self.components
                         .mixer_node_manager
                         .set_strip_gain(&node_id, strip, gain);
+                    // Apply gain to the linked source node
+                    if let Some(Some(source_id)) = strip_sources.get(strip) {
+                        self.handle_volume_change(*source_id, gain);
+                    }
+                    state_changed = true;
                 }
                 for (strip, muted) in response.strip_mute_toggles {
                     self.components
                         .mixer_node_manager
                         .set_strip_mute(&node_id, strip, muted);
+                    // Apply mute to the linked source node
+                    if let Some(Some(source_id)) = strip_sources.get(strip) {
+                        self.handle_mute_toggle(*source_id);
+                    }
+                    state_changed = true;
                 }
                 if let Some(gain) = response.master_gain_change {
                     self.components
@@ -1349,6 +1402,7 @@ impl PipeflowApp {
                         .set_master_gain(&node_id, gain);
                     // Also apply to the actual PipeWire node volume
                     self.handle_volume_change(node_id, gain);
+                    state_changed = true;
                 }
                 if let Some(muted) = response.master_mute_toggle {
                     self.components
@@ -1356,6 +1410,16 @@ impl PipeflowApp {
                         .set_master_mute(&node_id, muted);
                     // Also apply to the actual PipeWire node
                     self.handle_mute_toggle(node_id);
+                    state_changed = true;
+                }
+
+                // Persist mixer state on any change
+                if state_changed {
+                    if let Err(e) = mixer_persistence::save_mixer_node_states(
+                        &self.components.mixer_node_manager,
+                    ) {
+                        tracing::warn!("Failed to save mixer node state: {}", e);
+                    }
                 }
             } else {
                 ui.vertical_centered(|ui| {

@@ -20,6 +20,20 @@ pub enum UndoAction {
         /// Destination port.
         input_port: crate::util::id::PortId,
     },
+    /// Create a mixer node (used as redo action or undo of remove).
+    CreateMixerNode {
+        /// Display name.
+        name: String,
+        /// Number of stereo input strips.
+        input_count: usize,
+    },
+    /// Remove a mixer node (used as undo of create).
+    RemoveMixerNode {
+        /// The PipeWire node ID (valid at time of recording).
+        node_id: crate::util::id::NodeId,
+        /// Saved state for potential restoration.
+        state: crate::domain::mixer_node::MixerNodeState,
+    },
     /// Multiple actions executed together.
     Batch(Vec<UndoAction>),
 }

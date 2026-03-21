@@ -555,6 +555,26 @@ impl PipeflowApp {
                     );
                 }
             }
+            UndoAction::CreateMixerNode { name, input_count } => {
+                self.handle_app_command(AppCommand::CreateMixerNode { name, input_count });
+            }
+            UndoAction::RemoveMixerNode { node_id, state } => {
+                // Find the actual node ID by name (the recorded one may be stale)
+                let actual_id = self
+                    .components
+                    .mixer_node_manager
+                    .iter()
+                    .find(|(_, s)| s.name == state.name)
+                    .map(|(id, _)| *id)
+                    .unwrap_or(node_id);
+                self.handle_app_command(AppCommand::RemoveMixerNode(actual_id));
+                self.components.mixer_node_manager.remove(&actual_id);
+                if let Err(e) = super::mixer_persistence::save_mixer_node_states(
+                    &self.components.mixer_node_manager,
+                ) {
+                    tracing::warn!("Failed to save mixer node state after undo remove: {}", e);
+                }
+            }
             UndoAction::Batch(actions) => {
                 for a in actions {
                     self.execute_undo_action(a);

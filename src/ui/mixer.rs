@@ -972,6 +972,8 @@ impl MixerView {
         _graph: &GraphState,
         mixer_state: &MixerNodeState,
         theme: &Theme,
+        strip_meters: &[f32],
+        master_meter: f32,
     ) -> MixerViewResponse {
         let mut response = MixerViewResponse::default();
 
@@ -997,7 +999,6 @@ impl MixerView {
                 ui.horizontal(|ui| {
                     // Input strips
                     for (i, strip) in mixer_state.strips.iter().enumerate() {
-                        let strip_id = ui.id().with(("mixer_strip", i));
                         egui::Frame::NONE
                             .fill(theme.background.secondary)
                             .stroke(egui::Stroke::new(1.0, theme.background.grid))
@@ -1032,22 +1033,34 @@ impl MixerView {
 
                                     ui.add_space(8.0);
 
-                                    // Gain fader (vertical slider)
-                                    let mut gain = strip.gain;
-                                    let slider = egui::Slider::new(&mut gain, 0.0..=2.0)
-                                        .vertical()
-                                        .custom_formatter(|v, _| {
-                                            if v <= 0.0001 {
-                                                "−∞".to_string()
-                                            } else {
-                                                format!("{:+.1}", 20.0 * (v as f32).log10())
-                                            }
-                                        });
-                                    let slider_response =
-                                        ui.add_sized([40.0, MIXER_FADER_HEIGHT], slider);
-                                    if slider_response.changed() {
-                                        response.strip_gain_changes.push((i, gain));
-                                    }
+                                    // Gain fader + level meter side by side
+                                    ui.horizontal_top(|ui| {
+                                        let mut gain = strip.gain;
+                                        let slider = egui::Slider::new(&mut gain, 0.0..=2.0)
+                                            .vertical()
+                                            .custom_formatter(|v, _| {
+                                                if v <= 0.0001 {
+                                                    "−∞".to_string()
+                                                } else {
+                                                    format!("{:+.1}", 20.0 * (v as f32).log10())
+                                                }
+                                            });
+                                        let slider_response =
+                                            ui.add_sized([40.0, MIXER_FADER_HEIGHT], slider);
+                                        if slider_response.changed() {
+                                            response.strip_gain_changes.push((i, gain));
+                                        }
+
+                                        ui.add_space(6.0);
+                                        let meter_level =
+                                            strip_meters.get(i).copied().unwrap_or(0.0);
+                                        self.draw_level_meter(
+                                            ui,
+                                            meter_level,
+                                            strip.muted,
+                                            MIXER_FADER_HEIGHT,
+                                        );
+                                    });
 
                                     ui.add_space(4.0);
                                     ui.label(
@@ -1096,22 +1109,32 @@ impl MixerView {
 
                                 ui.add_space(8.0);
 
-                                // Master fader
-                                let mut master_gain = mixer_state.master_gain;
-                                let slider = egui::Slider::new(&mut master_gain, 0.0..=2.0)
-                                    .vertical()
-                                    .custom_formatter(|v, _| {
-                                        if v <= 0.0001 {
-                                            "−∞".to_string()
-                                        } else {
-                                            format!("{:+.1}", 20.0 * (v as f32).log10())
-                                        }
-                                    });
-                                let slider_response =
-                                    ui.add_sized([40.0, MIXER_FADER_HEIGHT], slider);
-                                if slider_response.changed() {
-                                    response.master_gain_change = Some(master_gain);
-                                }
+                                // Master fader + level meter
+                                ui.horizontal_top(|ui| {
+                                    let mut master_gain = mixer_state.master_gain;
+                                    let slider = egui::Slider::new(&mut master_gain, 0.0..=2.0)
+                                        .vertical()
+                                        .custom_formatter(|v, _| {
+                                            if v <= 0.0001 {
+                                                "−∞".to_string()
+                                            } else {
+                                                format!("{:+.1}", 20.0 * (v as f32).log10())
+                                            }
+                                        });
+                                    let slider_response =
+                                        ui.add_sized([40.0, MIXER_FADER_HEIGHT], slider);
+                                    if slider_response.changed() {
+                                        response.master_gain_change = Some(master_gain);
+                                    }
+
+                                    ui.add_space(6.0);
+                                    self.draw_level_meter(
+                                        ui,
+                                        master_meter,
+                                        mixer_state.master_muted,
+                                        MIXER_FADER_HEIGHT,
+                                    );
+                                });
 
                                 ui.add_space(4.0);
                                 ui.label(

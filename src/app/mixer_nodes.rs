@@ -3,6 +3,8 @@
 //! Tracks mixer nodes created by pipeflow, mapping PipeWire node IDs to
 //! [`MixerNodeState`] instances that hold per-strip and master state.
 
+use crate::core::state::GraphState;
+use crate::domain::graph::PortDirection;
 use crate::domain::mixer_node::MixerNodeState;
 use crate::util::id::NodeId;
 use std::collections::HashMap;
@@ -101,6 +103,54 @@ impl MixerNodeManager {
         // Return first match (there should be at most one per name)
         self.nodes.keys().find(|_| true).copied()
     }
+
+    /// Returns an iterator over all (node_id, state) pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (&NodeId, &MixerNodeState)> {
+        self.nodes.iter()
+    }
+}
+
+/// Finds the source node feeding a specific strip of a mixer node.
+///
+/// A mixer node created by pw-loopback has N stereo input port pairs.
+/// Strip index `i` corresponds to input ports with channel indices `2*i` and
+/// `2*i+1`.  We look for links whose `input_node == mixer_node_id` and whose
+/// input port belongs to the strip's channel range, then return the
+/// `output_node` from that link (the upstream source).
+///
+/// Returns `None` if no source is linked to that strip.
+pub fn find_source_node_for_strip(
+    graph: &GraphState,
+    mixer_node_id: NodeId,
+    strip_index: usize,
+) -> Option<NodeId> {
+    // Collect input ports for this mixer node, sorted by channel index
+    let mut input_ports: Vec<_> = graph
+        .ports
+        .values()
+        .filter(|p| p.node_id == mixer_node_id && p.direction == PortDirection::Input)
+        .collect();
+    input_ports.sort_by_key(|p| p.channel.unwrap_or(u32::MAX));
+
+    // Strip i uses ports at indices [2*i, 2*i+1] (stereo pair)
+    let port_start = strip_index * 2;
+    let strip_port_ids: Vec<_> = input_ports
+        .iter()
+        .skip(port_start)
+        .take(2)
+        .map(|p| p.id)
+        .collect();
+
+    if strip_port_ids.is_empty() {
+        return None;
+    }
+
+    // Find a link whose input port is one of this strip's ports
+    graph
+        .links
+        .values()
+        .find(|link| link.input_node == mixer_node_id && strip_port_ids.contains(&link.input_port))
+        .map(|link| link.output_node)
 }
 
 #[cfg(test)]
