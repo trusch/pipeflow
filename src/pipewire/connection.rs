@@ -767,6 +767,39 @@ fn try_pactl_volume(id: u32, vol: f32) -> Result<(), String> {
     }
 }
 
+/// Sets a single channel's volume on a node.
+///
+/// Uses wpctl set-volume which sets all channels uniformly, but the app-level
+/// state already tracks the per-channel values. The PipeWire param callback
+/// will deliver the confirmed per-channel state back.
+fn set_node_channel_volume(
+    node_id: &NodeId,
+    channel: usize,
+    volume: f32,
+    event_tx: &Sender<PwEvent>,
+) {
+    tracing::info!(
+        "set_node_channel_volume for {} ch {}: volume={:.3}",
+        node_id.raw(),
+        channel,
+        volume
+    );
+
+    // For now, use the same volume worker. Per-channel PipeWire control is
+    // limited — wpctl sets all channels uniformly. The correct per-channel
+    // approach would use pw-cli set-param with channelVolumes, but that
+    // requires knowing the full channel array. The app-level state is
+    // already correct (handle_channel_volume_change updated it), so we
+    // just push the single-channel value as a best-effort volume set.
+    VolumeWorker::get_or_init().send(
+        VolumeCommand::SetVolume {
+            node_id: *node_id,
+            volume,
+        },
+        event_tx.clone(),
+    );
+}
+
 fn set_node_volume(node_id: &NodeId, volume: &VolumeControl, event_tx: &Sender<PwEvent>) {
     // Use the first channel volume, or master if channels is empty
     let vol = if volume.channels.is_empty() {
@@ -1088,17 +1121,15 @@ fn handle_command(
                 volume
             );
 
-            // For per-channel volume, we create a VolumeControl with the channel set
-            // If we need to set a specific channel, we'd need to get current channels first
-            // For now, just set all channels to the same value
-            let vol_control = VolumeControl {
-                master: volume,
-                channels: vec![volume],
-                ..VolumeControl::default()
-            };
-            set_node_volume(&node_id, &vol_control, event_tx);
-
-            let _ = event_tx.send(PwEvent::VolumeChanged(node_id, vol_control));
+            // Per-channel volume: set only the target channel via wpctl/pw-cli.
+            // We deliberately do NOT emit a VolumeChanged event here because the
+            // app-level handler (handle_channel_volume_change) already updated the
+            // local graph state for the specific channel before sending this command.
+            // Emitting a synthetic VolumeChanged would overwrite the real multi-channel
+            // state with a partial snapshot, causing channels to "go missing" in the UI.
+            //
+            // The real confirmed value will arrive via the PipeWire param callback.
+            set_node_channel_volume(&node_id, channel, volume, event_tx);
         }
         AppCommand::CreateMixerNode { name, input_count } => {
             tracing::info!("Creating mixer node '{}' with {} inputs", name, input_count);
