@@ -1,9 +1,11 @@
-//! Group mixer view.
+//! Dedicated mixer views.
 //!
-//! Renders a dedicated mixer-style central view for the members of a node group.
+//! Group mixer: balances member node levels directly. It is intentionally not a bus.
+//! Node mixer: shows detailed master/channel/routing information for a single node.
 
 use crate::core::state::GraphState;
-use crate::domain::groups::{GroupId, NodeGroup};
+use crate::domain::graph::{Node, PortDirection};
+use crate::domain::groups::NodeGroup;
 use crate::ui::theme::Theme;
 use crate::util::id::NodeId;
 use std::collections::HashMap;
@@ -11,13 +13,14 @@ use std::collections::HashMap;
 #[derive(Debug, Default)]
 pub struct MixerView {
     slider_overrides: HashMap<NodeId, f32>,
-    master_slider_overrides: HashMap<GroupId, f32>,
+    channel_slider_overrides: HashMap<(NodeId, usize), f32>,
 }
 
 #[derive(Debug, Default)]
 pub struct MixerViewResponse {
     pub back_to_graph: bool,
     pub volume_changes: Vec<(NodeId, f32)>,
+    pub channel_volume_changes: Vec<(NodeId, usize, f32)>,
     pub mute_toggles: Vec<NodeId>,
 }
 
@@ -30,6 +33,22 @@ struct MixerStrip {
     muted: bool,
     meter: f32,
     volume_failed: Option<String>,
+}
+
+struct ChannelStrip {
+    node_id: NodeId,
+    channel_index: usize,
+    name: String,
+    backend_volume: f32,
+    effective_volume: f32,
+    meter: f32,
+    muted: bool,
+}
+
+struct RoutingRow {
+    label: String,
+    path: String,
+    state: &'static str,
 }
 
 const MIXER_DB_MARKS: &[(f32, &str)] = &[
@@ -46,7 +65,6 @@ const MIXER_STRIP_WIDTH: f32 = 168.0;
 const MIXER_STRIP_GAP: f32 = 16.0;
 const MIXER_FADER_HEIGHT: f32 = 332.0;
 const MIXER_CARD_HEIGHT: f32 = 560.0;
-const MIXER_SEPARATOR_WIDTH: f32 = 2.0;
 
 impl MixerView {
     pub fn new() -> Self {
@@ -68,27 +86,29 @@ impl MixerView {
         }
     }
 
-    fn master_slider_value(&self, group_id: GroupId, backend_value: f32) -> f32 {
-        self.master_slider_overrides
-            .get(&group_id)
+    fn channel_slider_value(&self, node_id: NodeId, channel: usize, backend_value: f32) -> f32 {
+        self.channel_slider_overrides
+            .get(&(node_id, channel))
             .copied()
             .unwrap_or(backend_value)
     }
 
-    fn sync_master_slider_override(
+    fn sync_channel_slider_override(
         &mut self,
-        group_id: GroupId,
+        node_id: NodeId,
+        channel: usize,
         backend_value: f32,
         ui_value: f32,
     ) {
         if (backend_value - ui_value).abs() < 0.01 {
-            self.master_slider_overrides.remove(&group_id);
+            self.channel_slider_overrides.remove(&(node_id, channel));
         } else {
-            self.master_slider_overrides.insert(group_id, ui_value);
+            self.channel_slider_overrides
+                .insert((node_id, channel), ui_value);
         }
     }
 
-    pub fn show(
+    pub fn show_group(
         &mut self,
         ui: &mut egui::Ui,
         graph: &GraphState,
@@ -96,17 +116,21 @@ impl MixerView {
         theme: &Theme,
     ) -> MixerViewResponse {
         let mut response = MixerViewResponse::default();
-        let strips = self.collect_strips(graph, group);
+        let strips = self.collect_group_strips(graph, group);
 
         egui::Frame::NONE
             .fill(egui::Color32::from_rgb(10, 12, 18))
             .inner_margin(egui::Margin::same(20))
             .show(ui, |ui| {
-                self.show_header(ui, group, strips.len(), theme, &mut response);
+                self.show_group_header(ui, group, strips.len(), theme, &mut response, &strips);
                 ui.add_space(18.0);
 
                 if strips.is_empty() {
-                    self.show_empty_state(ui);
+                    self.show_empty_state(
+                        ui,
+                        "No active members in this group",
+                        "Bring the grouped nodes online and they will appear here as mixer strips.",
+                    );
                     return;
                 }
 
@@ -118,11 +142,9 @@ impl MixerView {
                 egui::ScrollArea::horizontal()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        let strip_count = strips.len() as f32 + 1.0; // + master strip
+                        let strip_count = strips.len() as f32;
                         let content_width = strip_count * MIXER_STRIP_WIDTH
-                            + (strip_count - 1.0) * MIXER_STRIP_GAP
-                            + MIXER_SEPARATOR_WIDTH
-                            + MIXER_STRIP_GAP * 2.0;
+                            + (strip_count - 1.0).max(0.0) * MIXER_STRIP_GAP;
                         let leading_space = ((ui.available_width() - content_width) * 0.5).max(0.0);
 
                         ui.horizontal_top(|ui| {
@@ -130,24 +152,12 @@ impl MixerView {
                                 ui.add_space(leading_space);
                             }
 
-                            for strip in &strips {
+                            for (idx, strip) in strips.iter().enumerate() {
                                 self.show_strip(ui, strip, theme, &mut response);
-                                ui.add_space(MIXER_STRIP_GAP);
+                                if idx + 1 != strips.len() {
+                                    ui.add_space(MIXER_STRIP_GAP);
+                                }
                             }
-
-                            let sep_height = MIXER_CARD_HEIGHT - 8.0;
-                            let (sep_rect, _) = ui.allocate_exact_size(
-                                egui::vec2(MIXER_SEPARATOR_WIDTH, sep_height),
-                                egui::Sense::hover(),
-                            );
-                            ui.painter().rect_filled(
-                                sep_rect,
-                                1.0,
-                                egui::Color32::from_rgb(60, 70, 90),
-                            );
-                            ui.add_space(MIXER_STRIP_GAP);
-
-                            self.show_master_strip(ui, &strips, group, theme, &mut response);
                         });
                     });
             });
@@ -155,14 +165,97 @@ impl MixerView {
         response
     }
 
-    fn show_header(
+    pub fn show_node(
+        &mut self,
+        ui: &mut egui::Ui,
+        graph: &GraphState,
+        node: &Node,
+        theme: &Theme,
+    ) -> MixerViewResponse {
+        let mut response = MixerViewResponse::default();
+        let Some(volume) = graph.volumes.get(&node.id) else {
+            self.show_empty_state(
+                ui,
+                "No mixer data for this node",
+                "This node has not published volume information yet.",
+            );
+            return response;
+        };
+        let strip = self.collect_node_strip(graph, node);
+        let channels = self.collect_channel_strips(graph, node, volume);
+        let inputs = self.collect_routing_rows(graph, node.id, true);
+        let outputs = self.collect_routing_rows(graph, node.id, false);
+        let input_port_count = graph
+            .ports_for_node(&node.id)
+            .iter()
+            .filter(|port| port.direction == PortDirection::Input)
+            .count();
+        let output_port_count = graph
+            .ports_for_node(&node.id)
+            .iter()
+            .filter(|port| port.direction == PortDirection::Output)
+            .count();
+
+        egui::Frame::NONE
+            .fill(egui::Color32::from_rgb(10, 12, 18))
+            .inner_margin(egui::Margin::same(20))
+            .show(ui, |ui| {
+                self.show_node_header(ui, node, channels.len(), theme, &mut response);
+                ui.add_space(18.0);
+
+                ui.columns(2, |columns| {
+                    columns[0].vertical(|ui| {
+                        egui::ScrollArea::horizontal()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.horizontal_top(|ui| {
+                                    self.show_strip(ui, &strip, theme, &mut response);
+                                    for channel in &channels {
+                                        ui.add_space(MIXER_STRIP_GAP);
+                                        self.show_channel_strip(ui, channel, theme, &mut response);
+                                    }
+                                });
+                            });
+                    });
+
+                    columns[1].vertical(|ui| {
+                        self.show_node_summary_card(
+                            ui,
+                            node,
+                            channels.len(),
+                            input_port_count,
+                            output_port_count,
+                            inputs.len(),
+                            outputs.len(),
+                            theme,
+                        );
+                        ui.add_space(12.0);
+                        self.show_routing_card(ui, "Receiving from", &inputs, theme);
+                        ui.add_space(12.0);
+                        self.show_routing_card(ui, "Sending to", &outputs, theme);
+                    });
+                });
+            });
+
+        response
+    }
+
+    fn show_group_header(
         &self,
         ui: &mut egui::Ui,
         group: &NodeGroup,
         member_count: usize,
         theme: &Theme,
         response: &mut MixerViewResponse,
+        strips: &[MixerStrip],
     ) {
+        let all_muted = !strips.is_empty() && strips.iter().all(|strip| strip.muted);
+        let any_muted = strips.iter().any(|strip| strip.muted);
+        let peak_meter = strips
+            .iter()
+            .map(|strip| strip.meter)
+            .fold(0.0_f32, f32::max);
+
         ui.horizontal(|ui| {
             let back = egui::Button::new(format!(
                 "{} Back to Patch",
@@ -179,8 +272,8 @@ impl MixerView {
             ui.add_space(12.0);
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.heading(format!("{} Mixer", group.name));
-                    let chip_text = format!("{} channels", member_count);
+                    ui.heading(format!("{} Group Mixer", group.name));
+                    let chip_text = format!("{} members", member_count);
                     egui::Frame::NONE
                         .fill(egui::Color32::from_rgba_unmultiplied(
                             group.color.r,
@@ -201,7 +294,7 @@ impl MixerView {
                 });
                 ui.label(
                     egui::RichText::new(
-                        "Dedicated group mixer view with direct level control for every member.",
+                        "Direct member balancing only — this group mixer is not a real bus or master channel.",
                     )
                     .color(theme.text.muted),
                 );
@@ -214,47 +307,248 @@ impl MixerView {
                 );
             });
         });
+
+        ui.add_space(12.0);
+        egui::Frame::NONE
+            .fill(egui::Color32::from_rgb(18, 22, 31))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(58, 68, 88)))
+            .corner_radius(16)
+            .inner_margin(egui::Margin::symmetric(16, 14))
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("Live peak {}", Self::format_db(peak_meter)))
+                            .color(theme.text.primary)
+                            .strong(),
+                    );
+                    ui.separator();
+                    ui.label(
+                        egui::RichText::new(match (all_muted, any_muted) {
+                            (true, _) => "All members muted",
+                            (false, true) => "Some members muted",
+                            (false, false) => "All members unmuted",
+                        })
+                        .color(theme.text.muted),
+                    );
+                    ui.separator();
+                    ui.label(
+                        egui::RichText::new("Group actions affect member nodes directly.")
+                            .color(theme.text.muted),
+                    );
+                });
+
+                ui.add_space(10.0);
+                ui.horizontal_wrapped(|ui| {
+                    let mute_label = if all_muted {
+                        "Unmute All Members"
+                    } else {
+                        "Mute All Members"
+                    };
+                    if ui.button(mute_label).clicked() {
+                        let should_mute = !all_muted;
+                        for strip in strips {
+                            if strip.muted != should_mute {
+                                response.mute_toggles.push(strip.node_id);
+                            }
+                        }
+                    }
+
+                    if ui.button("Reset All Levels to 0 dB").clicked() {
+                        for strip in strips {
+                            response.volume_changes.push((strip.node_id, 1.0));
+                        }
+                    }
+                });
+            });
     }
 
-    fn show_empty_state(&self, ui: &mut egui::Ui) {
-        ui.vertical_centered(|ui| {
-            ui.add_space(40.0);
-            ui.heading("No active members in this group");
-            ui.label("Bring the grouped nodes online and they will appear here as mixer strips.");
+    fn show_node_header(
+        &self,
+        ui: &mut egui::Ui,
+        node: &Node,
+        channel_count: usize,
+        theme: &Theme,
+        response: &mut MixerViewResponse,
+    ) {
+        ui.horizontal(|ui| {
+            let back = egui::Button::new(format!(
+                "{} Back to Patch",
+                egui_phosphor::regular::ARROW_LEFT
+            ))
+            .corner_radius(10)
+            .fill(egui::Color32::from_rgb(28, 34, 48))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 90, 120)))
+            .min_size(egui::vec2(150.0, 34.0));
+            if ui.add(back).clicked() {
+                response.back_to_graph = true;
+            }
+
+            ui.add_space(12.0);
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.heading(format!("{} Node Mixer", node.display_name()));
+                    let chip_text = format!("{} channels", channel_count.max(1));
+                    egui::Frame::NONE
+                        .fill(egui::Color32::from_rgba_unmultiplied(90, 140, 220, 28))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(90, 140, 220)))
+                        .corner_radius(255)
+                        .inner_margin(egui::Margin::symmetric(10, 4))
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new(chip_text)
+                                    .color(theme.text.primary)
+                                    .strong(),
+                            );
+                        });
+                });
+                ui.label(
+                    egui::RichText::new(
+                        "Detailed single-node view for master level, per-channel balancing, and current routing context.",
+                    )
+                    .color(theme.text.muted),
+                );
+                ui.label(
+                    egui::RichText::new(
+                        "This is not a synthetic group bus. It operates on the selected node and reuses its real volume/channel state.",
+                    )
+                    .small()
+                    .color(theme.text.muted),
+                );
+            });
         });
     }
 
-    fn collect_strips(&self, graph: &GraphState, group: &NodeGroup) -> Vec<MixerStrip> {
+    fn show_empty_state(&self, ui: &mut egui::Ui, heading: &str, body: &str) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(40.0);
+            ui.heading(heading);
+            ui.label(body);
+        });
+    }
+
+    fn collect_group_strips(&self, graph: &GraphState, group: &NodeGroup) -> Vec<MixerStrip> {
         let mut strips: Vec<_> = group
             .members
             .iter()
             .filter_map(|node_id| {
                 let node = graph.get_node(node_id)?;
-                let volume = graph.volumes.get(node_id)?;
-                let meter = graph
-                    .meters
-                    .get(node_id)
-                    .map(|m| m.get_decayed_max_peak(std::time::Duration::from_millis(180)))
-                    .unwrap_or(0.0);
-                let backend_volume = volume.master;
-                Some(MixerStrip {
-                    node_id: *node_id,
-                    name: node.display_name().to_string(),
-                    subtitle: node
-                        .media_class
-                        .as_ref()
-                        .map(|m| m.display_name().to_string()),
-                    backend_volume,
-                    effective_volume: self.slider_value(*node_id, backend_volume),
-                    muted: volume.muted,
-                    meter,
-                    volume_failed: graph.volume_control_failed.get(node_id).cloned(),
-                })
+                Some(self.collect_node_strip(graph, node))
             })
             .collect();
 
         strips.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         strips
+    }
+
+    fn collect_node_strip(&self, graph: &GraphState, node: &Node) -> MixerStrip {
+        let volume = graph.volumes.get(&node.id).cloned().unwrap_or_default();
+        let meter = graph
+            .meters
+            .get(&node.id)
+            .map(|m| m.get_decayed_max_peak(std::time::Duration::from_millis(180)))
+            .unwrap_or(0.0);
+        let backend_volume = volume.master;
+        MixerStrip {
+            node_id: node.id,
+            name: node.display_name().to_string(),
+            subtitle: node
+                .media_class
+                .as_ref()
+                .map(|m| m.display_name().to_string()),
+            backend_volume,
+            effective_volume: self.slider_value(node.id, backend_volume),
+            muted: volume.muted,
+            meter,
+            volume_failed: graph.volume_control_failed.get(&node.id).cloned(),
+        }
+    }
+
+    fn collect_channel_strips(
+        &self,
+        graph: &GraphState,
+        node: &Node,
+        volume: &crate::domain::audio::VolumeControl,
+    ) -> Vec<ChannelStrip> {
+        let meter = graph.meters.get(&node.id);
+        volume
+            .channels
+            .iter()
+            .enumerate()
+            .map(|(channel_index, &backend_volume)| ChannelStrip {
+                node_id: node.id,
+                channel_index,
+                name: format!("Ch {}", channel_index + 1),
+                backend_volume,
+                effective_volume: self.channel_slider_value(node.id, channel_index, backend_volume),
+                meter: meter
+                    .map(|m| {
+                        m.get_decayed_peak(channel_index, std::time::Duration::from_millis(180))
+                    })
+                    .unwrap_or(0.0),
+                muted: volume.muted,
+            })
+            .collect()
+    }
+
+    fn collect_routing_rows(
+        &self,
+        graph: &GraphState,
+        node_id: NodeId,
+        receiving: bool,
+    ) -> Vec<RoutingRow> {
+        let mut rows: Vec<_> = graph
+            .links_for_node(&node_id)
+            .into_iter()
+            .filter(|link| {
+                if receiving {
+                    link.input_node == node_id
+                } else {
+                    link.output_node == node_id
+                }
+            })
+            .map(|link| {
+                let other_node_id = if receiving {
+                    link.output_node
+                } else {
+                    link.input_node
+                };
+                let other_name = graph
+                    .get_node(&other_node_id)
+                    .map(|node| node.display_name().to_string())
+                    .unwrap_or_else(|| "Unknown node".to_string());
+                let local_port = graph
+                    .get_port(
+                        &(if receiving {
+                            link.input_port
+                        } else {
+                            link.output_port
+                        }),
+                    )
+                    .map(|port| port.display_name().to_string())
+                    .unwrap_or_else(|| "Unknown port".to_string());
+                let remote_port = graph
+                    .get_port(
+                        &(if receiving {
+                            link.output_port
+                        } else {
+                            link.input_port
+                        }),
+                    )
+                    .map(|port| port.display_name().to_string())
+                    .unwrap_or_else(|| "Unknown port".to_string());
+                RoutingRow {
+                    label: other_name,
+                    path: if receiving {
+                        format!("{} → {}", remote_port, local_port)
+                    } else {
+                        format!("{} → {}", local_port, remote_port)
+                    },
+                    state: if link.is_active { "live" } else { "paused" },
+                }
+            })
+            .collect();
+        rows.sort_by(|a, b| a.label.cmp(&b.label));
+        rows
     }
 
     fn show_strip(
@@ -397,6 +691,104 @@ impl MixerView {
             });
     }
 
+    fn show_channel_strip(
+        &mut self,
+        ui: &mut egui::Ui,
+        strip: &ChannelStrip,
+        theme: &Theme,
+        response: &mut MixerViewResponse,
+    ) {
+        let card_fill = egui::Color32::from_rgb(18, 22, 31);
+        let card_stroke = if strip.muted {
+            egui::Color32::from_rgb(110, 70, 70)
+        } else {
+            egui::Color32::from_rgb(70, 88, 118)
+        };
+
+        egui::Frame::NONE
+            .fill(card_fill)
+            .stroke(egui::Stroke::new(1.0, card_stroke))
+            .corner_radius(18)
+            .inner_margin(egui::Margin::symmetric(16, 16))
+            .show(ui, |ui| {
+                ui.set_width(MIXER_STRIP_WIDTH * 0.9);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(MIXER_STRIP_WIDTH * 0.9, MIXER_CARD_HEIGHT),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        ui.label(
+                            egui::RichText::new(&strip.name)
+                                .strong()
+                                .size(16.0)
+                                .color(theme.text.primary),
+                        );
+                        ui.label(
+                            egui::RichText::new("Per-channel level")
+                                .small()
+                                .color(theme.text.muted),
+                        );
+                        ui.add_space(8.0);
+
+                        ui.horizontal_top(|ui| {
+                            self.draw_db_scale(ui, theme);
+                            ui.add_space(8.0);
+
+                            let mut slider_value = strip.effective_volume;
+                            let slider_size = egui::vec2(42.0, MIXER_FADER_HEIGHT);
+                            let resp = ui.add_sized(
+                                slider_size,
+                                egui::Slider::new(&mut slider_value, 0.0..=2.0)
+                                    .vertical()
+                                    .show_value(false)
+                                    .step_by(0.01)
+                                    .trailing_fill(true)
+                                    .handle_shape(egui::style::HandleShape::Rect {
+                                        aspect_ratio: 0.55,
+                                    }),
+                            );
+                            if resp.double_clicked() {
+                                slider_value = 1.0;
+                            }
+                            if resp.changed() || resp.double_clicked() {
+                                self.sync_channel_slider_override(
+                                    strip.node_id,
+                                    strip.channel_index,
+                                    strip.backend_volume,
+                                    slider_value,
+                                );
+                                response.channel_volume_changes.push((
+                                    strip.node_id,
+                                    strip.channel_index,
+                                    slider_value,
+                                ));
+                            } else {
+                                self.sync_channel_slider_override(
+                                    strip.node_id,
+                                    strip.channel_index,
+                                    strip.backend_volume,
+                                    slider_value,
+                                );
+                            }
+                            resp.on_hover_text(
+                                "Drag to set the per-channel level. Double-click to reset to unity (0 dB).",
+                            );
+
+                            ui.add_space(10.0);
+                            self.draw_level_meter(ui, strip.meter, strip.muted, slider_size.y);
+                        });
+
+                        ui.add_space(10.0);
+                        ui.label(
+                            egui::RichText::new(Self::format_volume_pair(strip.effective_volume))
+                                .monospace()
+                                .size(18.0)
+                                .strong(),
+                        );
+                    },
+                );
+            });
+    }
+
     fn draw_db_scale(&self, ui: &mut egui::Ui, theme: &Theme) {
         let height = MIXER_FADER_HEIGHT;
         let width = 30.0;
@@ -455,168 +847,112 @@ impl MixerView {
         }
     }
 
-    fn show_master_strip(
-        &mut self,
+    fn show_node_summary_card(
+        &self,
         ui: &mut egui::Ui,
-        strips: &[MixerStrip],
-        group: &NodeGroup,
+        node: &Node,
+        channel_count: usize,
+        input_port_count: usize,
+        output_port_count: usize,
+        input_link_count: usize,
+        output_link_count: usize,
         theme: &Theme,
-        response: &mut MixerViewResponse,
     ) {
-        if strips.is_empty() {
-            return;
-        }
-
-        // Derive master state from member strips.
-        let count = strips.len() as f32;
-        let avg_volume = strips.iter().map(|s| s.effective_volume).sum::<f32>() / count;
-        let peak_meter = strips.iter().map(|s| s.meter).fold(0.0_f32, f32::max);
-        let all_muted = strips.iter().all(|s| s.muted);
-        let any_muted = strips.iter().any(|s| s.muted);
-
-        let group_color = group.color.to_color32();
-        let card_fill = egui::Color32::from_rgb(16, 20, 30);
-        let card_stroke = if all_muted {
-            egui::Color32::from_rgb(130, 60, 60)
-        } else {
-            group_color
-        };
-
         egui::Frame::NONE
-            .fill(card_fill)
-            .stroke(egui::Stroke::new(2.0, card_stroke))
-            .corner_radius(18)
-            .inner_margin(egui::Margin::symmetric(20, 16))
+            .fill(egui::Color32::from_rgb(18, 22, 31))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(58, 68, 88)))
+            .corner_radius(16)
+            .inner_margin(egui::Margin::same(14))
             .show(ui, |ui| {
-                ui.set_width(MIXER_STRIP_WIDTH);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(MIXER_STRIP_WIDTH, MIXER_CARD_HEIGHT),
-                    egui::Layout::top_down(egui::Align::Center),
-                    |ui| {
-                    ui.label(
-                        egui::RichText::new("MASTER")
-                            .strong()
-                            .size(13.0)
-                            .color(group_color),
-                    );
-                    ui.label(
-                        egui::RichText::new(&group.name)
-                            .strong()
-                            .size(17.0)
-                            .color(theme.text.primary),
-                    );
-                    ui.label(
-                        egui::RichText::new(format!("{} ch", strips.len()))
-                            .small()
-                            .color(theme.text.muted),
-                    );
-                    ui.add_space(8.0);
-
-                    ui.horizontal_top(|ui| {
-                        self.draw_db_scale(ui, theme);
-                        ui.add_space(8.0);
-
-                        // Master volume slider — adjusts all members proportionally.
-                        let mut slider_value = self.master_slider_value(group.id, avg_volume);
-                        let slider_size = egui::vec2(48.0, MIXER_FADER_HEIGHT);
-                        let mut style = ui.style().as_ref().clone();
-                        style.spacing.slider_width = 240.0;
-                        style.visuals.widgets.active.bg_fill = group_color;
-                        style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(
-                            group.color.r.saturating_add(30),
-                            group.color.g.saturating_add(30),
-                            group.color.b.saturating_add(30),
+                ui.heading("Node summary");
+                ui.add_space(8.0);
+                egui::Grid::new(("node_mixer_summary", node.id.raw()))
+                    .num_columns(2)
+                    .spacing([12.0, 8.0])
+                    .show(ui, |ui| {
+                        ui.label("Media class");
+                        ui.label(
+                            node.media_class
+                                .as_ref()
+                                .map(|m| m.display_name().to_string())
+                                .unwrap_or_else(|| "Unknown".to_string()),
                         );
-                        style.visuals.widgets.inactive.bg_fill =
-                            egui::Color32::from_rgb(39, 45, 58);
-                        style.visuals.widgets.inactive.weak_bg_fill =
-                            egui::Color32::from_rgb(28, 33, 44);
-                        ui.scope(|ui| {
-                            ui.set_style(style);
-                            let slider = egui::Slider::new(&mut slider_value, 0.0..=2.0)
-                                .vertical()
-                                .show_value(false)
-                                .step_by(0.01)
-                                .trailing_fill(true)
-                                .handle_shape(egui::style::HandleShape::Rect {
-                                    aspect_ratio: 0.55,
-                                });
-                            let resp = ui.add_sized(slider_size, slider);
-                            if resp.double_clicked() {
-                                slider_value = 1.0;
-                            }
-                            if resp.changed() || resp.double_clicked() {
-                                self.sync_master_slider_override(group.id, avg_volume, slider_value);
-                                // Scale all members proportionally so their relative
-                                // balance is preserved, using the current effective levels
-                                // rather than stale backend values.
-                                let old_avg = avg_volume;
-                                for strip in strips {
-                                    let new_vol = if resp.double_clicked() {
-                                        1.0
-                                    } else if old_avg > 0.0001 {
-                                        (strip.effective_volume / old_avg * slider_value)
-                                            .clamp(0.0, 2.0)
-                                    } else {
-                                        slider_value.clamp(0.0, 2.0)
-                                    };
-                                    self.slider_overrides.insert(strip.node_id, new_vol);
-                                    response.volume_changes.push((strip.node_id, new_vol));
-                                }
-                            } else {
-                                self.sync_master_slider_override(group.id, avg_volume, slider_value);
-                            }
-                            resp.on_hover_text(
-                                "Master fader — scales all member volumes proportionally.\nDouble-click to reset all to unity (0 dB).",
+                        ui.end_row();
+
+                        ui.label("Channels");
+                        ui.label(channel_count.max(1).to_string());
+                        ui.end_row();
+
+                        ui.label("Input ports");
+                        ui.label(input_port_count.to_string());
+                        ui.end_row();
+
+                        ui.label("Output ports");
+                        ui.label(output_port_count.to_string());
+                        ui.end_row();
+
+                        ui.label("Incoming links");
+                        ui.label(input_link_count.to_string());
+                        ui.end_row();
+
+                        ui.label("Outgoing links");
+                        ui.label(output_link_count.to_string());
+                        ui.end_row();
+                    });
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(
+                        "Routing shown here is live graph context. Level controls operate on this node only.",
+                    )
+                    .small()
+                    .color(theme.text.muted),
+                );
+            });
+    }
+
+    fn show_routing_card(
+        &self,
+        ui: &mut egui::Ui,
+        heading: &str,
+        rows: &[RoutingRow],
+        theme: &Theme,
+    ) {
+        egui::Frame::NONE
+            .fill(egui::Color32::from_rgb(18, 22, 31))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(58, 68, 88)))
+            .corner_radius(16)
+            .inner_margin(egui::Margin::same(14))
+            .show(ui, |ui| {
+                ui.heading(heading);
+                ui.add_space(8.0);
+                if rows.is_empty() {
+                    ui.label(egui::RichText::new("No live connections").color(theme.text.muted));
+                    return;
+                }
+                for row in rows {
+                    egui::Frame::NONE
+                        .fill(egui::Color32::from_rgb(24, 28, 38))
+                        .corner_radius(10)
+                        .inner_margin(egui::Margin::same(10))
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new(&row.label)
+                                    .strong()
+                                    .color(theme.text.primary),
+                            );
+                            ui.label(
+                                egui::RichText::new(&row.path)
+                                    .small()
+                                    .color(theme.text.muted),
+                            );
+                            ui.label(
+                                egui::RichText::new(row.state)
+                                    .small()
+                                    .color(theme.text.muted),
                             );
                         });
-
-                        ui.add_space(10.0);
-                        self.draw_level_meter(ui, peak_meter, all_muted, slider_size.y);
-                    });
-
-                    ui.add_space(10.0);
-                    ui.label(
-                        egui::RichText::new(Self::format_volume_pair(avg_volume))
-                            .monospace()
-                            .size(18.0)
-                            .strong(),
-                    );
-                    ui.add_space(8.0);
-
-                    // Master mute toggles all members.
-                    let mute_text = if all_muted {
-                        format!("{} All Muted", egui_phosphor::regular::SPEAKER_SLASH)
-                    } else if any_muted {
-                        format!("{} Partial", egui_phosphor::regular::SPEAKER_LOW)
-                    } else {
-                        format!("{} Mute All", egui_phosphor::regular::SPEAKER_HIGH)
-                    };
-                    let mute_fill = if all_muted {
-                        egui::Color32::from_rgb(130, 46, 46)
-                    } else if any_muted {
-                        egui::Color32::from_rgb(90, 60, 40)
-                    } else {
-                        egui::Color32::from_rgb(35, 42, 56)
-                    };
-                    if ui
-                        .add(
-                            egui::Button::new(mute_text)
-                                .fill(mute_fill)
-                                .corner_radius(10)
-                                .min_size(egui::vec2(140.0, 34.0)),
-                        )
-                        .clicked()
-                    {
-                        // If any member is unmuted, mute all; otherwise unmute all.
-                        let should_mute = !all_muted;
-                        for strip in strips {
-                            if strip.muted != should_mute {
-                                response.mute_toggles.push(strip.node_id);
-                            }
-                        }
-                    }
-                });
+                    ui.add_space(6.0);
+                }
             });
     }
 

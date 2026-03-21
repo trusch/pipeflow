@@ -756,6 +756,10 @@ impl PipeflowApp {
                 self.components.rename_dialog.open(node_id, &current_name);
             }
         }
+
+        if let Some(node_id) = response.open_mixer {
+            self.components.center_view = CenterViewMode::NodeMixer(node_id);
+        }
     }
 
     /// Handles mute toggle from inspector.
@@ -1112,6 +1116,7 @@ impl PipeflowApp {
         match self.components.center_view {
             CenterViewMode::Graph => self.render_graph_view(ctx),
             CenterViewMode::GroupMixer(group_id) => self.render_group_mixer_view(ctx, group_id),
+            CenterViewMode::NodeMixer(node_id) => self.render_node_mixer_view(ctx, node_id),
         }
     }
 
@@ -1188,9 +1193,12 @@ impl PipeflowApp {
             let state = self.state.read();
             let maybe_group = state.ui.groups.get_group(&group_id).cloned();
             let response = if let Some(group) = maybe_group.as_ref() {
-                self.components
-                    .mixer_view
-                    .show(ui, &state.graph, group, &self.components.theme)
+                self.components.mixer_view.show_group(
+                    ui,
+                    &state.graph,
+                    group,
+                    &self.components.theme,
+                )
             } else {
                 ui.vertical_centered(|ui| {
                     ui.add_space(40.0);
@@ -1212,6 +1220,42 @@ impl PipeflowApp {
             }
             for (node_id, volume) in response.volume_changes {
                 self.handle_volume_change(node_id, volume);
+            }
+        });
+    }
+
+    fn render_node_mixer_view(&mut self, ctx: &egui::Context, node_id: crate::util::id::NodeId) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let state = self.state.read();
+            let maybe_node = state.graph.get_node(&node_id).cloned();
+            let response = if let Some(node) = maybe_node.as_ref() {
+                self.components
+                    .mixer_view
+                    .show_node(ui, &state.graph, node, &self.components.theme)
+            } else {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
+                    ui.heading("That node no longer exists");
+                    ui.label("Return to the patch view and pick another node.");
+                });
+                crate::ui::mixer::MixerViewResponse {
+                    back_to_graph: true,
+                    ..Default::default()
+                }
+            };
+            drop(state);
+
+            if response.back_to_graph {
+                self.components.center_view = CenterViewMode::Graph;
+            }
+            for node_id in response.mute_toggles {
+                self.handle_mute_toggle(node_id);
+            }
+            for (node_id, volume) in response.volume_changes {
+                self.handle_volume_change(node_id, volume);
+            }
+            for (node_id, channel, volume) in response.channel_volume_changes {
+                self.handle_channel_volume_change(node_id, channel, volume);
             }
         });
     }
@@ -1487,6 +1531,10 @@ impl PipeflowApp {
         // Open group mixer (from in-graph group chrome)
         if let Some(group_id) = response.open_group_mixer {
             self.components.center_view = CenterViewMode::GroupMixer(group_id);
+        }
+
+        if let Some(node_id) = response.open_node_mixer {
+            self.components.center_view = CenterViewMode::NodeMixer(node_id);
         }
     }
 

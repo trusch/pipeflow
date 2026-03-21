@@ -122,4 +122,6 @@ pub struct GraphViewResponse {
     pub rename_node: Option<NodeId>,
     /// Request to open the mixer for a group (from in-graph group chrome)
     pub open_group_mixer: Option<GroupId>,
+    /// Request to open the detailed mixer for a single node
+    pub open_node_mixer: Option<NodeId>,
 }

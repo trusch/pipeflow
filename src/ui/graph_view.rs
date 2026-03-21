@@ -806,6 +806,11 @@ impl GraphView {
                     response.snap_to_grid = Some(None); // None = all nodes
                     ui.close();
                 }
+                ui.add_enabled_ui(false, |ui| {
+                    ui.button("Insert Mixer Node… (planned)").on_hover_text(
+                        "Planned graph-native mixer node. See docs/mixer-node-architecture.md.",
+                    );
+                });
             }
         }
     }
@@ -1420,6 +1425,11 @@ impl GraphView {
 
         if ui.button("Rename...").clicked() {
             response.rename_node = Some(node_id);
+            ui.close();
+        }
+
+        if ui.button("Open Node Mixer").clicked() {
+            response.open_node_mixer = Some(node_id);
             ui.close();
         }
 

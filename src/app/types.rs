@@ -42,6 +42,7 @@ impl RenameNodeDialog {
 pub(crate) enum CenterViewMode {
     Graph,
     GroupMixer(GroupId),
+    NodeMixer(NodeId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -136,6 +136,10 @@ impl NodePanel {
                     if ui.button(button_text).clicked() {
                         response.toggle_uninteresting = Some(vec![node.id]);
                     }
+
+                    if ui.button("Open Node Mixer").clicked() {
+                        response.open_mixer = Some(node.id);
+                    }
                 });
             });
 
@@ -676,6 +680,8 @@ pub struct NodePanelResponse {
     pub toggle_node_selection: Option<(NodeId, bool)>,
     /// Open the rename dialog for a node
     pub rename_node: Option<NodeId>,
+    /// Open the detailed mixer view for a node
+    pub open_mixer: Option<NodeId>,
 }
 
 #[cfg(test)]
@@ -688,5 +694,6 @@ mod tests {
         assert!(response.toggle_mute.is_none());
         assert!(response.volume_changed.is_none());
         assert!(response.rename_node.is_none());
+        assert!(response.open_mixer.is_none());
     }
 }

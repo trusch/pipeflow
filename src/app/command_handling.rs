@@ -255,7 +255,10 @@ impl PipeflowApp {
 
             // Escape - Leave mixer or clear selection
             if input.key_pressed(egui::Key::Escape) {
-                if matches!(self.components.center_view, CenterViewMode::GroupMixer(_)) {
+                if matches!(
+                    self.components.center_view,
+                    CenterViewMode::GroupMixer(_) | CenterViewMode::NodeMixer(_)
+                ) {
                     self.components.center_view = CenterViewMode::Graph;
                 } else {
                     self.handle_ui_command(UiCommand::ClearSelection);
