@@ -54,4 +54,7 @@ impl AppState {
 }
 
 #[cfg(test)]
-include!("tests.inc");
+mod tests;
+
+#[cfg(test)]
+mod proptests;

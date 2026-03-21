@@ -11,6 +11,37 @@ use crate::util::id::NodeId;
 use crate::util::spatial::Position;
 use std::collections::HashMap;
 
+/// Base number of iterations for force-directed layout (used for graphs ≤ 100 nodes).
+const LAYOUT_BASE_ITERATIONS: usize = 200;
+
+/// Minimum iterations for medium graphs (101–500 nodes).
+const LAYOUT_MIN_ITERATIONS_MEDIUM: usize = 50;
+
+/// Minimum iterations for large graphs (> 500 nodes).
+const LAYOUT_MIN_ITERATIONS_LARGE: usize = 20;
+
+/// Convergence threshold: if total displacement per node drops below this,
+/// the layout is considered stable and iteration stops early.
+const LAYOUT_CONVERGENCE_THRESHOLD: f32 = 0.1;
+
+/// Repulsive force constant (Coulomb-like). Higher = nodes push apart more.
+const LAYOUT_REPULSION: f32 = 2000.0;
+
+/// Spring constant for link attraction (Hooke-like). Higher = connected nodes pull together more.
+const LAYOUT_ATTRACTION: f32 = 0.05;
+
+/// Horizontal bias strength pushing sources left and sinks right.
+const LAYOUT_LAYER_BIAS: f32 = 0.5;
+
+/// Velocity damping factor per iteration (0–1). Lower = more friction.
+const LAYOUT_DAMPING: f32 = 0.9;
+
+/// Maximum velocity magnitude per iteration step.
+const LAYOUT_MAX_VELOCITY: f32 = 50.0;
+
+/// Minimum distance for force calculations to avoid division-by-zero singularities.
+const LAYOUT_MIN_DIST: f32 = 1.0;
+
 /// Detects if a node is a pipeflow metering node by its name.
 /// Metering nodes are named "pipeflow-meter-{node_id}" where node_id is the
 /// numeric ID of the node being monitored.
@@ -300,14 +331,6 @@ pub fn force_directed_layout(
             .collect();
     }
 
-    const ITERATIONS: usize = 200;
-    const REPULSION: f32 = 2000.0;
-    const ATTRACTION: f32 = 0.05;
-    const LAYER_BIAS: f32 = 0.5;
-    const DAMPING: f32 = 0.9;
-    const MAX_VELOCITY: f32 = 50.0;
-    const MIN_DIST: f32 = 1.0;
-
     // Build index for fast lookup (only simulated nodes)
     let node_indices: HashMap<NodeId, usize> = sim_nodes
         .iter()
@@ -316,6 +339,18 @@ pub fn force_directed_layout(
         .collect();
 
     let n = sim_nodes.len();
+
+    // Scale iterations based on node count to avoid O(iterations * n²) freezes.
+    // For small graphs (≤100 nodes) we use the full budget; larger graphs get
+    // progressively fewer iterations. The force model converges quickly for
+    // well-connected graphs, so fewer iterations still produce usable layouts.
+    let max_iterations: usize = if n > 500 {
+        LAYOUT_MIN_ITERATIONS_LARGE
+    } else if n > 100 {
+        (LAYOUT_BASE_ITERATIONS - n).max(LAYOUT_MIN_ITERATIONS_MEDIUM)
+    } else {
+        LAYOUT_BASE_ITERATIONS
+    };
 
     // Initialize positions
     let mut positions: Vec<[f32; 2]> = sim_nodes
@@ -335,7 +370,7 @@ pub fn force_directed_layout(
 
     let mut velocities: Vec<[f32; 2]> = vec![[0.0, 0.0]; n];
 
-    for _ in 0..ITERATIONS {
+    for _ in 0..max_iterations {
         let mut forces: Vec<[f32; 2]> = vec![[0.0, 0.0]; n];
 
         // Repulsion: every pair
@@ -343,9 +378,9 @@ pub fn force_directed_layout(
             for j in (i + 1)..n {
                 let dx = positions[i][0] - positions[j][0];
                 let dy = positions[i][1] - positions[j][1];
-                let dist_sq = (dx * dx + dy * dy).max(MIN_DIST);
+                let dist_sq = (dx * dx + dy * dy).max(LAYOUT_MIN_DIST);
                 let dist = dist_sq.sqrt();
-                let force = REPULSION / dist_sq;
+                let force = LAYOUT_REPULSION / dist_sq;
                 let fx = force * dx / dist;
                 let fy = force * dy / dist;
                 forces[i][0] += fx;
@@ -365,8 +400,8 @@ pub fn force_directed_layout(
             };
             let dx = positions[j][0] - positions[i][0];
             let dy = positions[j][1] - positions[i][1];
-            let dist = (dx * dx + dy * dy).sqrt().max(MIN_DIST);
-            let force = ATTRACTION * dist;
+            let dist = (dx * dx + dy * dy).sqrt().max(LAYOUT_MIN_DIST);
+            let force = LAYOUT_ATTRACTION * dist;
             let fx = force * dx / dist;
             let fy = force * dy / dist;
             forces[i][0] += fx;
@@ -380,26 +415,33 @@ pub fn force_directed_layout(
             if let Some(mc) = media_class {
                 let col = mc.layout_column();
                 if col != 0 {
-                    forces[i][0] += col as f32 * LAYER_BIAS;
+                    forces[i][0] += col as f32 * LAYOUT_LAYER_BIAS;
                 }
             }
         }
 
-        // Apply forces with damping
+        // Apply forces with damping, tracking total displacement for convergence
+        let mut total_displacement = 0.0f32;
         for i in 0..n {
-            velocities[i][0] = (velocities[i][0] + forces[i][0]) * DAMPING;
-            velocities[i][1] = (velocities[i][1] + forces[i][1]) * DAMPING;
+            velocities[i][0] = (velocities[i][0] + forces[i][0]) * LAYOUT_DAMPING;
+            velocities[i][1] = (velocities[i][1] + forces[i][1]) * LAYOUT_DAMPING;
 
             // Clamp velocity
             let speed = (velocities[i][0].powi(2) + velocities[i][1].powi(2)).sqrt();
-            if speed > MAX_VELOCITY {
-                let scale = MAX_VELOCITY / speed;
+            if speed > LAYOUT_MAX_VELOCITY {
+                let scale = LAYOUT_MAX_VELOCITY / speed;
                 velocities[i][0] *= scale;
                 velocities[i][1] *= scale;
             }
 
             positions[i][0] += velocities[i][0];
             positions[i][1] += velocities[i][1];
+            total_displacement += velocities[i][0].abs() + velocities[i][1].abs();
+        }
+
+        // Early exit if the layout has converged (average displacement per node is tiny)
+        if n > 0 && total_displacement / n as f32 <= LAYOUT_CONVERGENCE_THRESHOLD {
+            break;
         }
     }
 

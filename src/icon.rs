@@ -66,7 +66,7 @@ pub fn create_app_icon() -> IconData {
             let wave = (progress * std::f32::consts::PI * 2.0 + i as f32 * 0.5).sin() * 15.0;
             let y = base_y + wave;
 
-            draw_circle(&mut rgba, size, fx, y, thickness / 2.0, color);
+            draw_filled_circle(&mut rgba, size, fx, y, thickness / 2.0, color);
         }
     }
 
@@ -166,11 +166,6 @@ fn draw_filled_circle(
             }
         }
     }
-}
-
-/// Draws a circle outline (used for flow lines).
-fn draw_circle(rgba: &mut [u8], size: usize, cx: f32, cy: f32, radius: f32, color: &[u8; 4]) {
-    draw_filled_circle(rgba, size, cx, cy, radius, color);
 }
 
 /// Alpha blends a pixel.

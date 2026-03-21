@@ -6,7 +6,7 @@
 //!
 //! # Module Organization
 //!
-//! - [`core`] - Application state management, commands, configuration, and typed errors
+//! - [`core`] - Application state management, commands, and configuration
 //! - [`domain`] - Domain models independent of PipeWire: graph, audio, safety, filters, groups, rules
 //! - [`util`] - Shared utilities: ID types, spatial positioning, layout algorithms
 

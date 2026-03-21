@@ -94,12 +94,14 @@ impl MeterStreamData {
     fn take_update(&mut self) -> Option<MeterUpdate> {
         if self.dirty {
             self.dirty = false;
-            // Swap out current buffers with fresh zeroed ones to avoid cloning.
-            // The old buffers become the update payload; new buffers are reused next cycle.
-            let mut peak = vec![0.0; self.channels as usize];
-            let mut rms = vec![0.0; self.channels as usize];
-            std::mem::swap(&mut self.peaks, &mut peak);
-            std::mem::swap(&mut self.rms, &mut rms);
+            // Clone the current values so the read always gets the most recent data.
+            // Then zero the stored values so the next audio callback fills fresh data.
+            // This avoids the artificial dips caused by swapping to zero — only
+            // genuinely silent periods will show zero.
+            let peak = self.peaks.clone();
+            let rms = self.rms.clone();
+            self.peaks.fill(0.0);
+            self.rms.fill(0.0);
             Some(MeterUpdate {
                 node_id: NodeId::new(self.node_id),
                 peak,

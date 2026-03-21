@@ -6,6 +6,8 @@
 #[cfg(feature = "network")]
 use std::net::SocketAddr;
 #[cfg(feature = "network")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "network")]
 use std::sync::Arc;
 
 #[cfg(feature = "network")]
@@ -74,13 +76,17 @@ pub async fn run_headless(
 
     tracing::info!("Starting headless pipeflow server on {}", bind_addr);
 
+    // Shared shutdown flag so the blocking event loop can exit gracefully
+    let running = Arc::new(AtomicBool::new(true));
+    let running_clone = running.clone();
+
     // Spawn event processing task
     let state_clone = state.clone();
     let grpc_server_clone = grpc_server.clone();
     let config_meters_enabled = config.meters.enabled;
 
     let event_handle = tokio::task::spawn_blocking(move || {
-        loop {
+        while running_clone.load(Ordering::SeqCst) {
             // Process PipeWire events
             let events = pw_connection.drain_events();
             if !events.is_empty() {
@@ -132,6 +138,9 @@ pub async fn run_headless(
     signal::ctrl_c().await?;
 
     tracing::info!("Shutting down headless server...");
+
+    // Signal the event processing loop to exit gracefully
+    running.store(false, Ordering::SeqCst);
 
     // Stop tasks
     event_handle.abort();

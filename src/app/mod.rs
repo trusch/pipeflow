@@ -679,6 +679,11 @@ impl PipeflowApp {
 
         if let Some(response) = link_response {
             if let Some((link_id, active)) = response.toggle_link {
+                // ToggleLink is UI-only: PipeWire has no concept of disabling a link
+                // without destroying it. We update local visual state but do NOT push
+                // an undo entry since there is no real PipeWire operation to reverse.
+                // TODO: implement real link toggling — remove the link on disable (store
+                // endpoints), recreate on enable. That would warrant undo entries.
                 {
                     let mut state = self.state.write();
                     if let Some(l) = state.graph.links.get_mut(&link_id) {
@@ -686,19 +691,6 @@ impl PipeflowApp {
                     }
                 }
                 self.handle_app_command(AppCommand::ToggleLink { link_id, active });
-                self.components.undo_stack.push(UndoEntry {
-                    description: if active {
-                        "Enable link"
-                    } else {
-                        "Disable link"
-                    }
-                    .to_string(),
-                    forward: UndoAction::AppCommand(AppCommand::ToggleLink { link_id, active }),
-                    reverse: UndoAction::AppCommand(AppCommand::ToggleLink {
-                        link_id,
-                        active: !active,
-                    }),
-                });
             }
 
             if let Some(link_id) = response.remove_link {
@@ -786,7 +778,7 @@ impl PipeflowApp {
             }
         }
 
-        // Handle link toggle
+        // Handle link toggle — UI-only, no undo (see render_link_inspector comment)
         if let Some((link_id, active)) = response.toggle_link {
             {
                 let mut state = self.state.write();
@@ -795,19 +787,6 @@ impl PipeflowApp {
                 }
             }
             self.handle_app_command(AppCommand::ToggleLink { link_id, active });
-            self.components.undo_stack.push(UndoEntry {
-                description: if active {
-                    "Enable link"
-                } else {
-                    "Disable link"
-                }
-                .to_string(),
-                forward: UndoAction::AppCommand(AppCommand::ToggleLink { link_id, active }),
-                reverse: UndoAction::AppCommand(AppCommand::ToggleLink {
-                    link_id,
-                    active: !active,
-                }),
-            });
         }
 
         // Handle toggle uninteresting
@@ -1280,12 +1259,18 @@ impl PipeflowApp {
         group_id: crate::domain::groups::GroupId,
     ) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            let state = self.state.read();
-            let maybe_group = state.ui.groups.get_group(&group_id).cloned();
+            // Clone the data we need, then drop the lock before rendering
+            let (maybe_group, graph_clone) = {
+                let state = self.state.read();
+                (
+                    state.ui.groups.get_group(&group_id).cloned(),
+                    state.graph.clone(),
+                )
+            };
             let response = if let Some(group) = maybe_group.as_ref() {
                 self.components.mixer_view.show_group(
                     ui,
-                    &state.graph,
+                    &graph_clone,
                     group,
                     &self.components.theme,
                 )
@@ -1300,7 +1285,6 @@ impl PipeflowApp {
                     ..Default::default()
                 }
             };
-            drop(state);
 
             if response.back_to_graph {
                 self.components.center_view = CenterViewMode::Graph;
@@ -1316,12 +1300,15 @@ impl PipeflowApp {
 
     fn render_node_mixer_view(&mut self, ctx: &egui::Context, node_id: crate::util::id::NodeId) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            let state = self.state.read();
-            let maybe_node = state.graph.get_node(&node_id).cloned();
+            // Clone needed data, drop lock before rendering
+            let (maybe_node, graph_clone) = {
+                let state = self.state.read();
+                (state.graph.get_node(&node_id).cloned(), state.graph.clone())
+            };
             let response = if let Some(node) = maybe_node.as_ref() {
                 self.components
                     .mixer_view
-                    .show_node(ui, &state.graph, node, &self.components.theme)
+                    .show_node(ui, &graph_clone, node, &self.components.theme)
             } else {
                 ui.vertical_centered(|ui| {
                     ui.add_space(40.0);
@@ -1333,7 +1320,6 @@ impl PipeflowApp {
                     ..Default::default()
                 }
             };
-            drop(state);
 
             if response.back_to_graph {
                 self.components.center_view = CenterViewMode::Graph;
@@ -1354,26 +1340,31 @@ impl PipeflowApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             let mixer_state = self.components.mixer_node_manager.get(&node_id).cloned();
             if let Some(mixer_state) = mixer_state {
-                // Collect per-strip source node IDs and meter data before rendering
-                let state = self.state.read();
-                let strip_sources: Vec<Option<crate::util::id::NodeId>> = (0..mixer_state
-                    .strip_count())
-                    .map(|i| mixer_nodes::find_source_node_for_strip(&state.graph, node_id, i))
-                    .collect();
-                let strip_meters: Vec<f32> = strip_sources
-                    .iter()
-                    .map(|src| {
-                        src.and_then(|nid| state.graph.meters.get(&nid))
-                            .map(|m| m.get_decayed_max_peak(std::time::Duration::from_millis(180)))
-                            .unwrap_or(0.0)
-                    })
-                    .collect();
-                let master_meter = state
-                    .graph
-                    .meters
-                    .get(&node_id)
-                    .map(|m| m.get_decayed_max_peak(std::time::Duration::from_millis(180)))
-                    .unwrap_or(0.0);
+                // Collect per-strip source node IDs and meter data, then drop lock before rendering
+                let (strip_sources, strip_meters, master_meter) = {
+                    let state = self.state.read();
+                    let strip_sources: Vec<Option<crate::util::id::NodeId>> = (0..mixer_state
+                        .strip_count())
+                        .map(|i| mixer_nodes::find_source_node_for_strip(&state.graph, node_id, i))
+                        .collect();
+                    let strip_meters: Vec<f32> = strip_sources
+                        .iter()
+                        .map(|src| {
+                            src.and_then(|nid| state.graph.meters.get(&nid))
+                                .map(|m| {
+                                    m.get_decayed_max_peak(std::time::Duration::from_millis(180))
+                                })
+                                .unwrap_or(0.0)
+                        })
+                        .collect();
+                    let master_meter = state
+                        .graph
+                        .meters
+                        .get(&node_id)
+                        .map(|m| m.get_decayed_max_peak(std::time::Duration::from_millis(180)))
+                        .unwrap_or(0.0);
+                    (strip_sources, strip_meters, master_meter)
+                };
 
                 let response = self.components.mixer_view.show_mixer_node(
                     ui,
@@ -1382,7 +1373,6 @@ impl PipeflowApp {
                     &strip_meters,
                     master_meter,
                 );
-                drop(state);
 
                 if response.back_to_graph {
                     self.components.center_view = CenterViewMode::Graph;

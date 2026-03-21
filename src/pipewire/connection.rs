@@ -183,6 +183,17 @@ struct NodeProxyHandle {
     _proxy_listener: ProxyListener,
 }
 
+/// The type of a PipeWire global object, for dispatch on removal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GlobalType {
+    Node,
+    Port,
+    Link,
+    Client,
+    Device,
+    Other,
+}
+
 /// Runtime state for the PipeWire thread.
 /// Tracks created objects so they can be managed later.
 struct PwRuntimeState {
@@ -194,6 +205,8 @@ struct PwRuntimeState {
     node_proxies: HashMap<NodeId, NodeProxyHandle>,
     /// PIDs of spawned mixer-node processes (pw-loopback)
     mixer_node_pids: HashMap<String, u32>,
+    /// Maps global IDs to their object types for targeted removal events
+    global_types: HashMap<u32, GlobalType>,
 }
 
 impl PwRuntimeState {
@@ -204,6 +217,7 @@ impl PwRuntimeState {
             next_link_id: 1_000_000,
             node_proxies: HashMap::new(),
             mixer_node_pids: HashMap::new(),
+            global_types: HashMap::new(),
         }
     }
 
@@ -345,13 +359,29 @@ fn try_connect_and_run(
     let event_tx_for_remove = event_tx.clone();
     let state_for_global = state.clone();
     let state_for_remove = state.clone();
+    let state_for_type_record = state.clone();
     let meter_manager_for_global = meter_manager.clone();
     let meter_manager_for_remove = meter_manager.clone();
     let core_for_global = core.clone();
     let registry_weak = Rc::downgrade(&registry);
     let _listener = registry
         .add_listener_local()
-        .global(move |global| match global.type_ {
+        .global(move |global| {
+            // Record the object type for targeted removal events later
+            let global_type = match global.type_ {
+                pipewire::types::ObjectType::Node => GlobalType::Node,
+                pipewire::types::ObjectType::Port => GlobalType::Port,
+                pipewire::types::ObjectType::Link => GlobalType::Link,
+                pipewire::types::ObjectType::Client => GlobalType::Client,
+                pipewire::types::ObjectType::Device => GlobalType::Device,
+                _ => GlobalType::Other,
+            };
+            state_for_type_record
+                .borrow_mut()
+                .global_types
+                .insert(global.id, global_type);
+
+            match global.type_ {
             pipewire::types::ObjectType::Node => {
                 if let Some(props) = global.props {
                     let node_name = props.get("node.name").unwrap_or("");
@@ -439,7 +469,7 @@ fn try_connect_and_run(
                 let _ = event_tx_for_global.send(PwEvent::LinkAdded(info));
             }
             _ => handle_global_added(&event_tx_for_global, global),
-        })
+        }})
         .global_remove(move |id| {
             // Clean up node proxy when removed
             let node_id = NodeId::new(id);
@@ -451,7 +481,7 @@ fn try_connect_and_run(
             meter_manager_for_remove
                 .borrow_mut()
                 .unregister_node(&node_id);
-            handle_global_removed(&event_tx_for_remove, id);
+            handle_global_removed(&event_tx_for_remove, id, &state_for_remove);
         })
         .register();
 
@@ -905,60 +935,94 @@ enum VolumeCommand {
     SetMute { node_id: NodeId, muted: bool },
 }
 
-/// Capacity for the volume command channel.
-/// Small buffer provides backpressure during rapid UI interactions.
-const VOLUME_COMMAND_CAPACITY: usize = 8;
-
 /// Global volume worker handle (lazy initialized).
 static VOLUME_WORKER: std::sync::OnceLock<VolumeWorker> = std::sync::OnceLock::new();
 
+/// Latest-value store for volume commands.
+/// Protected by a Mutex so rapid UI drags always store the final value
+/// without dropping intermediate commands.
+struct VolumeLatestStore {
+    /// Latest volume values per node (coalesced)
+    volumes: HashMap<NodeId, f32>,
+    /// Latest mute states per node
+    mutes: HashMap<NodeId, bool>,
+    /// Event sender (set once on first use)
+    event_tx: Option<Sender<PwEvent>>,
+}
+
 /// Handle to the volume control worker thread.
 struct VolumeWorker {
-    tx: Sender<(VolumeCommand, Sender<PwEvent>)>,
+    latest: std::sync::Arc<std::sync::Mutex<VolumeLatestStore>>,
 }
 
 impl VolumeWorker {
     fn get_or_init() -> &'static VolumeWorker {
         VOLUME_WORKER.get_or_init(|| {
-            let (tx, rx) = bounded::<(VolumeCommand, Sender<PwEvent>)>(VOLUME_COMMAND_CAPACITY);
+            let latest = std::sync::Arc::new(std::sync::Mutex::new(VolumeLatestStore {
+                volumes: HashMap::new(),
+                mutes: HashMap::new(),
+                event_tx: None,
+            }));
 
-            // Spawn worker thread
+            let latest_clone = latest.clone();
+
+            // Spawn worker thread that polls the latest-value store every 16ms
             if let Err(e) = std::thread::Builder::new()
                 .name("volume-control".to_string())
                 .spawn(move || {
-                    volume_worker_thread(rx);
+                    volume_worker_thread(latest_clone);
                 })
             {
                 tracing::error!("Failed to spawn volume worker thread: {}", e);
             }
 
-            VolumeWorker { tx }
+            VolumeWorker { latest }
         })
     }
 
     fn send(&self, cmd: VolumeCommand, event_tx: Sender<PwEvent>) {
-        // Use try_send to avoid blocking; drop command if queue is full
-        if let Err(e) = self.tx.try_send((cmd, event_tx)) {
-            tracing::debug!(
-                "Volume command dropped (queue full or disconnected): {:?}",
-                e
-            );
+        if let Ok(mut store) = self.latest.lock() {
+            store.event_tx = Some(event_tx);
+            match cmd {
+                VolumeCommand::SetVolume { node_id, volume } => {
+                    store.volumes.insert(node_id, volume);
+                }
+                VolumeCommand::SetMute { node_id, muted } => {
+                    store.mutes.insert(node_id, muted);
+                }
+            }
         }
     }
 }
 
-/// Worker thread that processes volume/mute commands sequentially.
-fn volume_worker_thread(rx: Receiver<(VolumeCommand, Sender<PwEvent>)>) {
+/// Worker thread that polls the latest-value store and applies changes.
+/// Polls every 16ms (~60Hz) so rapid slider drags always deliver the final value.
+fn volume_worker_thread(latest: std::sync::Arc<std::sync::Mutex<VolumeLatestStore>>) {
     tracing::debug!("Volume worker thread started");
 
-    while let Ok((cmd, event_tx)) = rx.recv() {
-        match cmd {
-            VolumeCommand::SetVolume { node_id, volume } => {
-                execute_set_volume(node_id, volume, &event_tx);
-            }
-            VolumeCommand::SetMute { node_id, muted } => {
-                execute_set_mute(node_id, muted, &event_tx);
-            }
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(16));
+
+        let (volumes, mutes, event_tx) = {
+            let Ok(mut store) = latest.lock() else {
+                // Mutex poisoned — exit
+                break;
+            };
+            let volumes: HashMap<NodeId, f32> = store.volumes.drain().collect();
+            let mutes: HashMap<NodeId, bool> = store.mutes.drain().collect();
+            let event_tx = store.event_tx.clone();
+            (volumes, mutes, event_tx)
+        };
+
+        let Some(event_tx) = event_tx else {
+            continue;
+        };
+
+        for (node_id, volume) in volumes {
+            execute_set_volume(node_id, volume, &event_tx);
+        }
+        for (node_id, muted) in mutes {
+            execute_set_mute(node_id, muted, &event_tx);
         }
     }
 
@@ -1033,12 +1097,31 @@ fn set_node_mute(node_id: &NodeId, muted: bool, event_tx: &Sender<PwEvent>) {
 }
 
 /// Handles a global object being removed.
-fn handle_global_removed(event_tx: &Sender<PwEvent>, id: u32) {
-    // We don't know what type was removed, so we send removal events for all types
-    // The application will ignore removals for IDs it doesn't have
-    let _ = event_tx.send(PwEvent::NodeRemoved(crate::util::id::NodeId::new(id)));
-    let _ = event_tx.send(PwEvent::PortRemoved(crate::util::id::PortId::new(id)));
-    let _ = event_tx.send(PwEvent::LinkRemoved(crate::util::id::LinkId::new(id)));
+/// Looks up the recorded type to emit only the correct removal event.
+/// Falls back to emitting all three if the type is unknown (backwards compat).
+fn handle_global_removed(event_tx: &Sender<PwEvent>, id: u32, state: &Rc<RefCell<PwRuntimeState>>) {
+    let global_type = state.borrow_mut().global_types.remove(&id);
+
+    match global_type {
+        Some(GlobalType::Node) => {
+            let _ = event_tx.send(PwEvent::NodeRemoved(crate::util::id::NodeId::new(id)));
+        }
+        Some(GlobalType::Port) => {
+            let _ = event_tx.send(PwEvent::PortRemoved(crate::util::id::PortId::new(id)));
+        }
+        Some(GlobalType::Link) => {
+            let _ = event_tx.send(PwEvent::LinkRemoved(crate::util::id::LinkId::new(id)));
+        }
+        Some(GlobalType::Client) | Some(GlobalType::Device) | Some(GlobalType::Other) => {
+            // No removal events needed for these types
+        }
+        None => {
+            // Unknown type — fall back to emitting all three for backwards compat
+            let _ = event_tx.send(PwEvent::NodeRemoved(crate::util::id::NodeId::new(id)));
+            let _ = event_tx.send(PwEvent::PortRemoved(crate::util::id::PortId::new(id)));
+            let _ = event_tx.send(PwEvent::LinkRemoved(crate::util::id::LinkId::new(id)));
+        }
+    }
 }
 
 /// Handles a command from the main thread.

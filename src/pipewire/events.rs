@@ -266,6 +266,16 @@ impl NodeInfo {
     }
 
     fn parse_format(props: &std::collections::HashMap<String, String>) -> Option<AudioFormat> {
+        let has_rate = props.contains_key("audio.rate");
+        let has_channels = props.contains_key("audio.channels");
+        let has_format = props.contains_key("audio.format");
+
+        // Only construct AudioFormat if at least one audio property is present.
+        // Non-audio nodes (e.g., MIDI, video) should return None.
+        if !has_rate && !has_channels && !has_format {
+            return None;
+        }
+
         let sample_rate = props
             .get("audio.rate")
             .and_then(|s| s.parse().ok())

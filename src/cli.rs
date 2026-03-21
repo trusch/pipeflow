@@ -142,7 +142,13 @@ mod tests {
 
     #[test]
     fn test_remote_without_user() {
-        std::env::set_var("USER", "testuser");
+        // SAFETY: set_var is unsound in multi-threaded programs because it mutates
+        // shared process state without synchronization. This is test-only code and
+        // acceptable here because cargo test runs each test module in its own process
+        // by default, and this particular env var is only read by our own parse_remote.
+        unsafe {
+            std::env::set_var("USER", "testuser");
+        }
         let cli = Cli::parse_from(["pipeflow", "--remote", "192.168.1.100"]);
         let target = cli.parse_remote().unwrap();
         assert_eq!(target.user, "testuser");

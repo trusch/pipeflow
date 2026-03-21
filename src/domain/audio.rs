@@ -4,6 +4,14 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Decay factor applied to peak hold values each update when the current peak
+/// is below the held value. Closer to 1.0 = slower decay.
+const PEAK_HOLD_DECAY: f32 = 0.99;
+
+/// Exponential decay rate (per second) for staleness-based meter decay.
+/// At 3.0, roughly 5% of the signal remains after 1 second past the threshold.
+const STALENESS_DECAY_RATE: f32 = 3.0;
+
 /// Volume control for a node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VolumeControl {
@@ -82,15 +90,15 @@ impl Default for MeterData {
 impl MeterData {
     /// Updates meter values with new data.
     pub fn update(&mut self, peak: Vec<f32>, rms: Vec<f32>) {
+        // Ensure peak_hold can accommodate all incoming channels
+        self.peak_hold.resize(peak.len(), 0.0);
+
         // Update peak hold (decay slowly)
-        let decay = 0.99;
         for (i, &new_peak) in peak.iter().enumerate() {
-            if i < self.peak_hold.len() {
-                if new_peak > self.peak_hold[i] {
-                    self.peak_hold[i] = new_peak;
-                } else {
-                    self.peak_hold[i] *= decay;
-                }
+            if new_peak > self.peak_hold[i] {
+                self.peak_hold[i] = new_peak;
+            } else {
+                self.peak_hold[i] *= PEAK_HOLD_DECAY;
             }
         }
 
@@ -124,8 +132,7 @@ impl MeterData {
         let elapsed = self.last_update.elapsed();
         if elapsed > stale_threshold {
             let stale_secs = (elapsed - stale_threshold).as_secs_f32();
-            // Decay rate of 3.0 means ~5% remaining after 1 second
-            let decay_factor = (-stale_secs * 3.0).exp();
+            let decay_factor = (-stale_secs * STALENESS_DECAY_RATE).exp();
             value * decay_factor
         } else {
             value
@@ -521,12 +528,12 @@ mod tests {
     #[test]
     fn test_meter_data_update_channel_resize() {
         let mut meter = MeterData::default();
-        // Update with more channels than peak_hold
+        // Update with more channels than initial peak_hold — should auto-resize
         meter.update(vec![0.5, 0.3, 0.7], vec![0.3, 0.2, 0.5]);
         assert_eq!(meter.peak.len(), 3);
         assert_eq!(meter.rms.len(), 3);
-        // peak_hold only updated for existing indices
-        assert_eq!(meter.peak_hold.len(), 2);
+        assert_eq!(meter.peak_hold.len(), 3);
+        assert_eq!(meter.peak_hold[2], 0.7); // New channel's peak tracked
     }
 
     #[test]

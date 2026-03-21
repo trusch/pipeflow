@@ -185,7 +185,10 @@ fn run_remote(cli: &Cli) -> Result<(), String> {
     // Set up SSH tunnel and connect
     let local_addr = format!("127.0.0.1:{}", cli.local_port);
 
-    runtime
+    // Keep the tunnel handle alive across the GUI lifetime.
+    // If it's dropped before eframe::run_native returns, the SSH tunnel
+    // process is killed and the remote connection dies.
+    let _tunnel = runtime
         .block_on(async {
             // Start SSH tunnel
             let mut tunnel = ssh::SshTunnel::new(
@@ -208,11 +211,12 @@ fn run_remote(cli: &Cli) -> Result<(), String> {
             // Give the remote server time to start
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+            Ok::<_, Box<dyn std::error::Error + Send + Sync>>(tunnel)
         })
         .map_err(|e| e.to_string())?;
 
-    // Now run the GUI connecting to the local forwarded port
+    // Now run the GUI connecting to the local forwarded port.
+    // _tunnel is kept alive until this function returns.
     run_remote_gui(&local_addr, cli.token.clone())
 }
 
