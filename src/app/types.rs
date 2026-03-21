@@ -214,6 +214,9 @@ pub(crate) struct AppComponents {
     pub center_view: CenterViewMode,
 
     // --- Mixer nodes ---
+    /// Deferred placement buffer: nodes waiting for links before final positioning
+    pub pending_placement: std::collections::HashMap<crate::util::id::NodeId, std::time::Instant>,
+
     /// Manager for pipeflow-created mixer nodes
     pub mixer_node_manager: MixerNodeManager,
     /// Whether mixer node state has been modified and needs saving.
@@ -261,6 +264,7 @@ impl AppComponents {
             right_sidebar: SidebarState::default(),
             active_workspace: WorkspaceSection::Patch,
             center_view: CenterViewMode::Graph,
+            pending_placement: std::collections::HashMap::new(),
             mixer_node_manager: MixerNodeManager::new(),
             mixer_state_dirty: false,
             mixer_state_last_change: None,

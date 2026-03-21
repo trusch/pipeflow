@@ -9,7 +9,7 @@ use crate::domain::graph::{Link, Node, Port, PortDirection};
 use crate::domain::rules::RuleTrigger;
 use crate::pipewire::events::{MeterUpdate, PwEvent};
 use crate::util::id::NodeId;
-use crate::util::layout::{get_metering_target_id, is_metering_node, SmartLayout};
+use crate::util::layout::{get_metering_target_id, is_metering_node, place_new_node, LayoutConfig};
 use crate::util::spatial::Position;
 
 use super::command_handling::create_stable_identifier;
@@ -238,7 +238,11 @@ impl PipeflowApp {
                     if info.name.starts_with("pipeflow-mixer-") {
                         new_mixer_node_ids.push((info.id, info.name.clone()));
                     }
-                    Self::handle_node_added(&mut state, info);
+                    if let Some(deferred_id) = Self::handle_node_added(&mut state, info) {
+                        self.components
+                            .pending_placement
+                            .insert(deferred_id, std::time::Instant::now());
+                    }
                 }
                 PwEvent::NodeRemoved(id) => {
                     // Persist volume before removing node
@@ -482,6 +486,83 @@ impl PipeflowApp {
         }
     }
 
+    /// Processes deferred node placements.
+    ///
+    /// Nodes without connections or clear media class are buffered temporarily.
+    /// Once links arrive or 200ms elapses, they are placed using the layered algorithm.
+    pub(super) fn process_deferred_placements(&mut self) {
+        if self.components.pending_placement.is_empty() {
+            return;
+        }
+
+        let now = std::time::Instant::now();
+        let timeout = std::time::Duration::from_millis(200);
+        let config = LayoutConfig::default();
+
+        let state = self.state.read();
+        let mut to_place: Vec<(NodeId, Position)> = Vec::new();
+
+        let pending: Vec<(NodeId, std::time::Instant)> = self
+            .components
+            .pending_placement
+            .iter()
+            .map(|(&id, &t)| (id, t))
+            .collect();
+
+        for (node_id, queued_at) in &pending {
+            let has_links = state
+                .graph
+                .links
+                .values()
+                .any(|l| l.output_node == *node_id || l.input_node == *node_id);
+            let timed_out = now.duration_since(*queued_at) >= timeout;
+
+            if has_links || timed_out {
+                let viewport_center = if state.ui.node_positions.is_empty() {
+                    Position::zero()
+                } else {
+                    let cx: f32 = state.ui.node_positions.values().map(|p| p.x).sum::<f32>()
+                        / state.ui.node_positions.len() as f32;
+                    let cy: f32 = state.ui.node_positions.values().map(|p| p.y).sum::<f32>()
+                        / state.ui.node_positions.len() as f32;
+                    Position::new(cx, cy)
+                };
+
+                let media_class = state
+                    .graph
+                    .get_node(node_id)
+                    .and_then(|n| n.media_class.as_ref());
+
+                let pos = place_new_node(
+                    *node_id,
+                    media_class,
+                    &state.graph,
+                    &state.ui.node_positions,
+                    viewport_center,
+                    &config,
+                );
+
+                to_place.push((*node_id, pos));
+            }
+        }
+
+        drop(state);
+
+        for (node_id, pos) in to_place {
+            self.components.pending_placement.remove(&node_id);
+
+            let mut state = self.state.write();
+            state.ui.animate_to_position(node_id, pos, true);
+
+            // Also persist the position
+            if let Some(node) = state.graph.get_node(&node_id) {
+                let identifier =
+                    super::command_handling::create_stable_identifier(node, &state.graph);
+                state.ui.persistent_positions.insert(identifier, pos);
+            }
+        }
+    }
+
     /// Drains events from PipeWire or remote connection.
     fn drain_events(&self) -> Vec<PwEvent> {
         if let Some(ref pw) = self.pw_connection {
@@ -506,10 +587,14 @@ impl PipeflowApp {
     ///
     /// This is an associated function (not a method) to avoid borrow conflicts
     /// when called from within a state lock.
+    /// Handles a node being added to the graph.
+    ///
+    /// Returns `Some(node_id)` if the node needs deferred placement (no links, no clear
+    /// media class). The caller should buffer these for later placement.
     fn handle_node_added(
         state: &mut crate::core::state::AppState,
         info: crate::pipewire::events::NodeInfo,
-    ) {
+    ) -> Option<NodeId> {
         let media_class = info.media_class.clone();
         let app_name = info.application_name.clone();
         let node_name = info.name.clone();
@@ -545,8 +630,7 @@ impl PipeflowApp {
         // Try to restore position from persistent storage first
         if !state.ui.restore_position_for_node(info.id, &identifier) {
             // No saved position - calculate a new one
-            let layout = SmartLayout::new();
-            let config = layout.config();
+            let config = LayoutConfig::default();
 
             // Check if this is a metering node (satellite) - position to the right of main node
             let position = if is_metering_node(&node_name) {
@@ -565,14 +649,57 @@ impl PipeflowApp {
                     Position::zero()
                 }
             } else {
-                // Regular node - place near connected nodes to minimize line lengths
-                let viewport_center = Position::zero();
-                layout.calculate_new_node_position(
-                    info.id,
-                    &state.graph,
-                    &state.ui.node_positions,
-                    viewport_center,
-                )
+                // Regular node - use layered placement
+                // Compute viewport center as centroid of existing positions
+                let viewport_center = if state.ui.node_positions.is_empty() {
+                    Position::zero()
+                } else {
+                    let cx: f32 = state.ui.node_positions.values().map(|p| p.x).sum::<f32>()
+                        / state.ui.node_positions.len() as f32;
+                    let cy: f32 = state.ui.node_positions.values().map(|p| p.y).sum::<f32>()
+                        / state.ui.node_positions.len() as f32;
+                    Position::new(cx, cy)
+                };
+
+                // Check if this node should be deferred (no media class hint and no links yet)
+                let has_links = state
+                    .graph
+                    .links
+                    .values()
+                    .any(|l| l.output_node == info.id || l.input_node == info.id);
+                let is_source_or_sink = media_class
+                    .as_ref()
+                    .map(|mc| mc.layout_column() != 0)
+                    .unwrap_or(false);
+
+                if !has_links && !is_source_or_sink {
+                    // Signal caller to buffer for deferred placement
+                    // Temporarily place at viewport center (will be refined)
+                    state.ui.animate_to_position(info.id, viewport_center, true);
+                    state
+                        .ui
+                        .persistent_positions
+                        .insert(identifier.clone(), viewport_center);
+                    state
+                        .ui
+                        .restore_uninteresting_for_node(info.id, &identifier);
+                    state.ui.restore_custom_name_for_node(info.id, &identifier);
+                    if let Some(volume) = state.ui.restore_volume_for_node(&identifier).cloned() {
+                        state.graph.volumes.insert(info.id, volume);
+                    }
+                    state.ui.groups.reconcile_node(info.id, &identifier);
+                    Self::reconcile_rules_for_node(state, info.id);
+                    return Some(info.id);
+                } else {
+                    place_new_node(
+                        info.id,
+                        media_class.as_ref(),
+                        &state.graph,
+                        &state.ui.node_positions,
+                        viewport_center,
+                        &config,
+                    )
+                }
             };
 
             state.ui.animate_to_position(info.id, position, true);
@@ -606,6 +733,7 @@ impl PipeflowApp {
 
         // Reconcile connection rules for this node
         Self::reconcile_rules_for_node(state, info.id);
+        None
     }
 
     /// Evaluates connection rules when a node appears.

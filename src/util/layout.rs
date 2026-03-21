@@ -1,46 +1,14 @@
-//! Simple layout utilities for node positioning.
+//! Layered layout engine for audio flow graphs.
 //!
-//! Provides basic node placement that:
-//! - Places new nodes near their connected nodes (minimize line lengths)
-//! - Avoids overlapping boxes
-//! - Positions metering nodes to the right of their main nodes
+//! Uses a simplified Sugiyama-style approach to produce clean left-to-right
+//! layouts: sources on the left, processing in the middle, sinks on the right.
+//! No overlaps, tight spacing, clean routing lines.
 
 use crate::core::state::GraphState;
 use crate::domain::graph::MediaClass;
 use crate::util::id::NodeId;
 use crate::util::spatial::Position;
 use std::collections::HashMap;
-
-/// Base number of iterations for force-directed layout (used for graphs ≤ 100 nodes).
-const LAYOUT_BASE_ITERATIONS: usize = 200;
-
-/// Minimum iterations for medium graphs (101–500 nodes).
-const LAYOUT_MIN_ITERATIONS_MEDIUM: usize = 50;
-
-/// Minimum iterations for large graphs (> 500 nodes).
-const LAYOUT_MIN_ITERATIONS_LARGE: usize = 20;
-
-/// Convergence threshold: if total displacement per node drops below this,
-/// the layout is considered stable and iteration stops early.
-const LAYOUT_CONVERGENCE_THRESHOLD: f32 = 0.1;
-
-/// Repulsive force constant (Coulomb-like). Higher = nodes push apart more.
-const LAYOUT_REPULSION: f32 = 2000.0;
-
-/// Spring constant for link attraction (Hooke-like). Higher = connected nodes pull together more.
-const LAYOUT_ATTRACTION: f32 = 0.05;
-
-/// Horizontal bias strength pushing sources left and sinks right.
-const LAYOUT_LAYER_BIAS: f32 = 0.5;
-
-/// Velocity damping factor per iteration (0–1). Lower = more friction.
-const LAYOUT_DAMPING: f32 = 0.9;
-
-/// Maximum velocity magnitude per iteration step.
-const LAYOUT_MAX_VELOCITY: f32 = 50.0;
-
-/// Minimum distance for force calculations to avoid division-by-zero singularities.
-const LAYOUT_MIN_DIST: f32 = 1.0;
 
 /// Detects if a node is a pipeflow metering node by its name.
 /// Metering nodes are named "pipeflow-meter-{node_id}" where node_id is the
@@ -61,23 +29,20 @@ pub fn get_metering_target_id(node_name: &str) -> Option<NodeId> {
 }
 
 /// Configuration for layout calculations.
-/// This is the single source of truth for all placement-related constants.
 #[derive(Debug, Clone)]
 pub struct LayoutConfig {
     /// Node width for layout calculations
     pub node_width: f32,
     /// Node height estimate for layout calculations
     pub node_height: f32,
-    /// Horizontal spacing between nodes
-    pub node_spacing_x: f32,
-    /// Vertical spacing between nodes
-    pub node_spacing_y: f32,
+    /// Horizontal spacing between layers
+    pub horizontal_spacing: f32,
+    /// Vertical spacing between nodes within a layer
+    pub vertical_spacing: f32,
     /// Gap between main node and satellite/metering node
     pub satellite_gap: f32,
-    /// Vertical offset for satellite nodes (slight stagger)
+    /// Vertical offset for satellite nodes
     pub satellite_offset_y: f32,
-    /// Horizontal offset for source/sink column placement
-    pub column_offset: f32,
 }
 
 impl Default for LayoutConfig {
@@ -85,400 +50,404 @@ impl Default for LayoutConfig {
         Self {
             node_width: 200.0,
             node_height: 80.0,
-            node_spacing_x: 60.0,
-            node_spacing_y: 80.0,
+            horizontal_spacing: 300.0,
+            vertical_spacing: 100.0,
             satellite_gap: 15.0,
             satellite_offset_y: 10.0,
-            column_offset: 250.0,
         }
     }
 }
 
-/// Simple layout calculator for node positioning.
-pub struct SmartLayout {
-    config: LayoutConfig,
-}
-
-impl SmartLayout {
-    /// Creates a new layout calculator with default config.
-    pub fn new() -> Self {
-        Self {
-            config: LayoutConfig::default(),
-        }
-    }
-
-    /// Returns a reference to the layout configuration.
-    pub fn config(&self) -> &LayoutConfig {
-        &self.config
-    }
-
-    /// Calculates a position for a newly appearing node.
-    ///
-    /// Strategy:
-    /// 1. Find all nodes this new node is connected to (via links)
-    /// 2. If connected to existing nodes: place near the centroid of connected nodes
-    /// 3. If no connections: place at viewport center with column hint
-    /// 4. Find first non-overlapping position
-    pub fn calculate_new_node_position(
-        &self,
-        node_id: NodeId,
-        graph: &GraphState,
-        current_positions: &HashMap<NodeId, Position>,
-        viewport_center: Position,
-    ) -> Position {
-        let node = match graph.get_node(&node_id) {
-            Some(n) => n,
-            None => return viewport_center,
-        };
-
-        // Find all nodes this node is connected to via links
-        let connected_positions: Vec<Position> = graph
-            .links
-            .values()
-            .filter_map(|link| {
-                if link.output_node == node_id {
-                    current_positions.get(&link.input_node).copied()
-                } else if link.input_node == node_id {
-                    current_positions.get(&link.output_node).copied()
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let base_position = if !connected_positions.is_empty() {
-            // Place near the centroid of connected nodes
-            let sum_x: f32 = connected_positions.iter().map(|p| p.x).sum();
-            let sum_y: f32 = connected_positions.iter().map(|p| p.y).sum();
-            let count = connected_positions.len() as f32;
-            let centroid = Position::new(sum_x / count, sum_y / count);
-
-            // Adjust X based on media class (sources slightly left, sinks slightly right)
-            let x_adjust = node
-                .media_class
-                .as_ref()
-                .map(|mc| match mc.layout_column() {
-                    -1 => -self.config.node_spacing_x,
-                    1 => self.config.node_spacing_x,
-                    _ => 0.0,
-                })
-                .unwrap_or(0.0);
-
-            Position::new(centroid.x + x_adjust, centroid.y)
-        } else {
-            // No connections - place based on media class column
-            let column = node
-                .media_class
-                .as_ref()
-                .map(|mc| mc.layout_column())
-                .unwrap_or(0);
-
-            let base_x = match column {
-                -1 => viewport_center.x - self.config.column_offset,
-                1 => viewport_center.x + self.config.column_offset,
-                _ => viewport_center.x,
-            };
-
-            Position::new(base_x, viewport_center.y)
-        };
-
-        // Find a non-overlapping position near the base
-        self.find_free_spot_near(base_position, node.media_class.as_ref(), current_positions)
-    }
-
-    /// Finds a free spot near a target position.
-    /// Uses a spatial grid for O(1) amortized collision detection on large graphs.
-    fn find_free_spot_near(
-        &self,
-        target: Position,
-        media_class: Option<&MediaClass>,
-        current_positions: &HashMap<NodeId, Position>,
-    ) -> Position {
-        let min_distance = self.min_distance();
-
-        // Build spatial grid for fast proximity queries
-        let grid = crate::util::spatial::SpatialGrid::from_positions(
-            min_distance,
-            current_positions.values().copied(),
-        );
-
-        // Adjust x based on media class
-        let adjusted_x = if let Some(mc) = media_class {
-            match mc.layout_column() {
-                -1 => target.x - self.config.node_spacing_x / 2.0,
-                1 => target.x + self.config.node_spacing_x / 2.0,
-                _ => target.x,
-            }
-        } else {
-            target.x
-        };
-
-        let target = Position::new(adjusted_x, target.y);
-
-        // Try the target position first
-        if !grid.has_neighbor_within(target, min_distance) {
-            return target;
-        }
-
-        // Try positions in expanding circles
-        for radius in 1..20 {
-            let offset = radius as f32 * self.config.node_spacing_y;
-
-            // Try below first (most natural for new nodes)
-            let below = Position::new(target.x, target.y + offset);
-            if !grid.has_neighbor_within(below, min_distance) {
-                return below;
-            }
-
-            // Then above
-            let above = Position::new(target.x, target.y - offset);
-            if !grid.has_neighbor_within(above, min_distance) {
-                return above;
-            }
-
-            // Then to the sides
-            let right = Position::new(target.x + offset, target.y);
-            if !grid.has_neighbor_within(right, min_distance) {
-                return right;
-            }
-
-            let left = Position::new(target.x - offset, target.y);
-            if !grid.has_neighbor_within(left, min_distance) {
-                return left;
-            }
-        }
-
-        // Fallback: just place it below the target
-        Position::new(target.x, target.y + self.config.node_spacing_y)
-    }
-
-    /// Returns the minimum distance between nodes for layout.
-    fn min_distance(&self) -> f32 {
-        (self.config.node_width.powi(2) + self.config.node_height.powi(2)).sqrt() * 0.6
-    }
-
-    /// Checks if a position is free (no overlapping nodes).
-    /// Uses O(n) scan — for batch operations, prefer building a SpatialGrid.
-    #[cfg(test)]
-    fn is_position_free(
-        &self,
-        pos: Position,
-        current_positions: &HashMap<NodeId, Position>,
-    ) -> bool {
-        let min_distance = self.min_distance();
-
-        for existing in current_positions.values() {
-            if pos.distance_to(existing) < min_distance {
-                return false;
-            }
-        }
-
-        true
-    }
-}
-
-impl Default for SmartLayout {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Performs a force-directed layout on nodes.
+/// Calculates positions for all nodes using layered layout.
 ///
-/// Uses a simple spring-electric model:
-/// - Repulsion between all node pairs (Coulomb's law)
-/// - Attraction along links (Hooke's law)
-/// - Layer bias to create left-to-right flow (sources → sinks)
-pub fn force_directed_layout(
+/// Algorithm (simplified Sugiyama):
+/// 1. Separate satellites (metering nodes) from regular nodes
+/// 2. Build adjacency from links
+/// 3. Assign layers via topological ordering
+/// 4. Order nodes within layers using barycenter heuristic
+/// 5. Assign (x, y) positions
+/// 6. Place satellites next to their parents
+pub fn layered_layout(
     nodes: &[(NodeId, Option<MediaClass>, String)],
     links: &[(NodeId, NodeId)],
-    existing_positions: &HashMap<NodeId, Position>,
     config: &LayoutConfig,
 ) -> HashMap<NodeId, Position> {
     if nodes.is_empty() {
         return HashMap::new();
     }
 
-    // Identify satellite (metering) nodes and map them to their parents
+    // 1. Separate satellites from regular nodes
     let mut satellite_to_parent: HashMap<NodeId, NodeId> = HashMap::new();
-    for (id, _, name) in nodes {
+    let mut regular_nodes: Vec<(NodeId, Option<&MediaClass>)> = Vec::new();
+
+    for (id, mc, name) in nodes {
         if is_metering_node(name) {
             if let Some(parent_id) = get_metering_target_id(name) {
                 satellite_to_parent.insert(*id, parent_id);
+                continue;
             }
+        }
+        regular_nodes.push((*id, mc.as_ref()));
+    }
+
+    if regular_nodes.is_empty() {
+        return HashMap::new();
+    }
+
+    let node_set: std::collections::HashSet<NodeId> =
+        regular_nodes.iter().map(|(id, _)| *id).collect();
+
+    // 2. Build adjacency (only for regular nodes present in the set)
+    let mut predecessors: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+    let mut successors: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+    for &(from, to) in links {
+        if node_set.contains(&from) && node_set.contains(&to) {
+            successors.entry(from).or_default().push(to);
+            predecessors.entry(to).or_default().push(from);
         }
     }
 
-    // Filter to only non-satellite nodes for the simulation
-    let sim_nodes: Vec<&(NodeId, Option<MediaClass>, String)> = nodes
+    // 3. Assign layers via topological walk
+    //    layer[n] = max(layer[pred] + 1) for all predecessors
+    //    Nodes with no predecessors start at layer 0.
+    let mut layers: HashMap<NodeId, usize> = HashMap::new();
+
+    // Topological sort using Kahn's algorithm
+    let mut in_degree: HashMap<NodeId, usize> = HashMap::new();
+    for &(id, _) in &regular_nodes {
+        in_degree.insert(id, predecessors.get(&id).map_or(0, |v| v.len()));
+    }
+
+    let mut queue: std::collections::VecDeque<NodeId> = in_degree
         .iter()
-        .filter(|(id, _, _)| !satellite_to_parent.contains_key(id))
+        .filter(|(_, &deg)| deg == 0)
+        .map(|(&id, _)| id)
         .collect();
 
-    if sim_nodes.is_empty() {
-        // All nodes are satellites with no parents in this set — just return existing
-        return nodes
-            .iter()
-            .map(|(id, _, _)| {
-                (
-                    *id,
-                    existing_positions
-                        .get(id)
-                        .copied()
-                        .unwrap_or(Position::new(0.0, 0.0)),
-                )
+    // Sort queue for determinism
+    let mut queue_vec: Vec<NodeId> = queue.drain(..).collect();
+    queue_vec.sort_by_key(|id| id.raw());
+    queue = queue_vec.into_iter().collect();
+
+    while let Some(node) = queue.pop_front() {
+        let my_layer = predecessors
+            .get(&node)
+            .map(|preds| {
+                preds
+                    .iter()
+                    .filter_map(|p| layers.get(p))
+                    .max()
+                    .map_or(0, |m| m + 1)
             })
-            .collect();
-    }
+            .unwrap_or(0);
+        layers.insert(node, my_layer);
 
-    // Build index for fast lookup (only simulated nodes)
-    let node_indices: HashMap<NodeId, usize> = sim_nodes
-        .iter()
-        .enumerate()
-        .map(|(i, (id, _, _))| (*id, i))
-        .collect();
-
-    let n = sim_nodes.len();
-
-    // Scale iterations based on node count to avoid O(iterations * n²) freezes.
-    // For small graphs (≤100 nodes) we use the full budget; larger graphs get
-    // progressively fewer iterations. The force model converges quickly for
-    // well-connected graphs, so fewer iterations still produce usable layouts.
-    let max_iterations: usize = if n > 500 {
-        LAYOUT_MIN_ITERATIONS_LARGE
-    } else if n > 100 {
-        (LAYOUT_BASE_ITERATIONS - n).max(LAYOUT_MIN_ITERATIONS_MEDIUM)
-    } else {
-        LAYOUT_BASE_ITERATIONS
-    };
-
-    // Initialize positions
-    let mut positions: Vec<[f32; 2]> = sim_nodes
-        .iter()
-        .enumerate()
-        .map(|(i, (id, _, _))| {
-            if let Some(pos) = existing_positions.get(id) {
-                [pos.x, pos.y]
-            } else {
-                // Spread unpositioned nodes in a grid pattern
-                let row = i / 5;
-                let col = i % 5;
-                [col as f32 * 250.0, row as f32 * 150.0]
-            }
-        })
-        .collect();
-
-    let mut velocities: Vec<[f32; 2]> = vec![[0.0, 0.0]; n];
-
-    for _ in 0..max_iterations {
-        let mut forces: Vec<[f32; 2]> = vec![[0.0, 0.0]; n];
-
-        // Repulsion: every pair
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let dx = positions[i][0] - positions[j][0];
-                let dy = positions[i][1] - positions[j][1];
-                let dist_sq = (dx * dx + dy * dy).max(LAYOUT_MIN_DIST);
-                let dist = dist_sq.sqrt();
-                let force = LAYOUT_REPULSION / dist_sq;
-                let fx = force * dx / dist;
-                let fy = force * dy / dist;
-                forces[i][0] += fx;
-                forces[i][1] += fy;
-                forces[j][0] -= fx;
-                forces[j][1] -= fy;
-            }
-        }
-
-        // Attraction: along links (only between simulated nodes)
-        for (out_id, in_id) in links {
-            let Some(&i) = node_indices.get(out_id) else {
-                continue;
-            };
-            let Some(&j) = node_indices.get(in_id) else {
-                continue;
-            };
-            let dx = positions[j][0] - positions[i][0];
-            let dy = positions[j][1] - positions[i][1];
-            let dist = (dx * dx + dy * dy).sqrt().max(LAYOUT_MIN_DIST);
-            let force = LAYOUT_ATTRACTION * dist;
-            let fx = force * dx / dist;
-            let fy = force * dy / dist;
-            forces[i][0] += fx;
-            forces[i][1] += fy;
-            forces[j][0] -= fx;
-            forces[j][1] -= fy;
-        }
-
-        // Layer bias: sources left, sinks right
-        for (i, (_id, media_class, _)) in sim_nodes.iter().enumerate() {
-            if let Some(mc) = media_class {
-                let col = mc.layout_column();
-                if col != 0 {
-                    forces[i][0] += col as f32 * LAYOUT_LAYER_BIAS;
+        if let Some(succs) = successors.get(&node) {
+            for &s in succs {
+                if let Some(deg) = in_degree.get_mut(&s) {
+                    *deg = deg.saturating_sub(1);
+                    if *deg == 0 {
+                        queue.push_back(s);
+                    }
                 }
             }
         }
+    }
 
-        // Apply forces with damping, tracking total displacement for convergence
-        let mut total_displacement = 0.0f32;
-        for i in 0..n {
-            velocities[i][0] = (velocities[i][0] + forces[i][0]) * LAYOUT_DAMPING;
-            velocities[i][1] = (velocities[i][1] + forces[i][1]) * LAYOUT_DAMPING;
-
-            // Clamp velocity
-            let speed = (velocities[i][0].powi(2) + velocities[i][1].powi(2)).sqrt();
-            if speed > LAYOUT_MAX_VELOCITY {
-                let scale = LAYOUT_MAX_VELOCITY / speed;
-                velocities[i][0] *= scale;
-                velocities[i][1] *= scale;
-            }
-
-            positions[i][0] += velocities[i][0];
-            positions[i][1] += velocities[i][1];
-            total_displacement += velocities[i][0].abs() + velocities[i][1].abs();
-        }
-
-        // Early exit if the layout has converged (average displacement per node is tiny)
-        if n > 0 && total_displacement / n as f32 <= LAYOUT_CONVERGENCE_THRESHOLD {
-            break;
+    // Handle cycles: any node not yet layered gets assigned based on media class
+    for &(id, mc) in &regular_nodes {
+        if !layers.contains_key(&id) {
+            let layer = match mc.map(|m| m.layout_column()) {
+                Some(-1) => 0,
+                Some(1) => 2,
+                _ => 1,
+            };
+            layers.insert(id, layer);
         }
     }
 
-    // Center around (0, 0)
-    let cx: f32 = positions.iter().map(|p| p[0]).sum::<f32>() / n as f32;
-    let cy: f32 = positions.iter().map(|p| p[1]).sum::<f32>() / n as f32;
+    // Apply media class overrides:
+    // Sources should be in the earliest layers, sinks in the latest
+    let max_layer = layers.values().copied().max().unwrap_or(0);
+    // Ensure sinks are at least at max_layer (or max_layer if max_layer is 0)
+    let sink_layer = max_layer.max(2);
 
-    let mut result: HashMap<NodeId, Position> = sim_nodes
-        .iter()
-        .enumerate()
-        .map(|(i, (id, _, _))| {
-            (
-                *id,
-                Position::new(positions[i][0] - cx, positions[i][1] - cy),
-            )
-        })
-        .collect();
+    for &(id, mc) in &regular_nodes {
+        if let Some(media_class) = mc {
+            match media_class.layout_column() {
+                -1 => {
+                    // Sources: force to layer 0
+                    layers.insert(id, 0);
+                }
+                1 => {
+                    // Sinks: force to sink_layer
+                    layers.insert(id, sink_layer);
+                }
+                _ => {}
+            }
+        }
+    }
 
-    // Place satellite nodes next to their parents
-    for (satellite_id, parent_id) in &satellite_to_parent {
-        if let Some(parent_pos) = result.get(parent_id) {
-            let sat_pos = Position::new(
-                parent_pos.x + config.node_width + config.satellite_gap,
-                parent_pos.y + config.satellite_offset_y,
+    // Recalculate max_layer after overrides
+    let max_layer = layers.values().copied().max().unwrap_or(0);
+
+    // 4. Order nodes within layers using barycenter heuristic
+    // Build layer -> ordered list of nodes
+    let mut layer_nodes: Vec<Vec<NodeId>> = vec![Vec::new(); max_layer + 1];
+    for &(id, _) in &regular_nodes {
+        if let Some(&layer) = layers.get(&id) {
+            layer_nodes[layer].push(id);
+        }
+    }
+
+    // Initial ordering: sort by node ID for determinism
+    for layer in &mut layer_nodes {
+        layer.sort_by_key(|id| id.raw());
+    }
+
+    // Barycenter ordering: 3 passes (forward, backward, forward)
+    for pass in 0..3 {
+        if pass % 2 == 0 {
+            // Forward sweep: order layer L based on positions in layer L-1
+            for l in 1..=max_layer {
+                let prev_layer = &layer_nodes[l - 1];
+                let prev_positions: HashMap<NodeId, f32> = prev_layer
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &id)| (id, i as f32))
+                    .collect();
+
+                let mut barycenters: Vec<(NodeId, f32)> = layer_nodes[l]
+                    .iter()
+                    .map(|&id| {
+                        let connected: Vec<f32> = predecessors
+                            .get(&id)
+                            .map(|preds| {
+                                preds
+                                    .iter()
+                                    .filter_map(|p| prev_positions.get(p))
+                                    .copied()
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+
+                        let bc = if connected.is_empty() {
+                            f32::MAX // no connections: keep current order
+                        } else {
+                            connected.iter().sum::<f32>() / connected.len() as f32
+                        };
+                        (id, bc)
+                    })
+                    .collect();
+
+                barycenters
+                    .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                layer_nodes[l] = barycenters.into_iter().map(|(id, _)| id).collect();
+            }
+        } else {
+            // Backward sweep: order layer L based on positions in layer L+1
+            for l in (0..max_layer).rev() {
+                let next_layer = &layer_nodes[l + 1];
+                let next_positions: HashMap<NodeId, f32> = next_layer
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &id)| (id, i as f32))
+                    .collect();
+
+                let mut barycenters: Vec<(NodeId, f32)> = layer_nodes[l]
+                    .iter()
+                    .map(|&id| {
+                        let connected: Vec<f32> = successors
+                            .get(&id)
+                            .map(|succs| {
+                                succs
+                                    .iter()
+                                    .filter_map(|s| next_positions.get(s))
+                                    .copied()
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+
+                        let bc = if connected.is_empty() {
+                            f32::MAX
+                        } else {
+                            connected.iter().sum::<f32>() / connected.len() as f32
+                        };
+                        (id, bc)
+                    })
+                    .collect();
+
+                barycenters
+                    .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                layer_nodes[l] = barycenters.into_iter().map(|(id, _)| id).collect();
+            }
+        }
+    }
+
+    // 5. Assign positions
+    let mut result: HashMap<NodeId, Position> = HashMap::new();
+
+    for (layer_idx, layer) in layer_nodes.iter().enumerate() {
+        let x = layer_idx as f32 * config.horizontal_spacing;
+        let layer_height = layer.len() as f32 * config.vertical_spacing;
+        let y_start = -layer_height / 2.0 + config.vertical_spacing / 2.0;
+
+        for (node_idx, &id) in layer.iter().enumerate() {
+            let y = y_start + node_idx as f32 * config.vertical_spacing;
+            result.insert(id, Position::new(x, y));
+        }
+    }
+
+    // Center the whole graph around (0, 0)
+    if !result.is_empty() {
+        let cx: f32 = result.values().map(|p| p.x).sum::<f32>() / result.len() as f32;
+        let cy: f32 = result.values().map(|p| p.y).sum::<f32>() / result.len() as f32;
+        for pos in result.values_mut() {
+            pos.x -= cx;
+            pos.y -= cy;
+        }
+    }
+
+    // 6. Place satellites next to their parents
+    for (&satellite_id, &parent_id) in &satellite_to_parent {
+        if let Some(&parent_pos) = result.get(&parent_id) {
+            result.insert(
+                satellite_id,
+                Position::new(
+                    parent_pos.x + config.node_width + config.satellite_gap,
+                    parent_pos.y + config.satellite_offset_y,
+                ),
             );
-            result.insert(*satellite_id, sat_pos);
-        } else if let Some(parent_pos) = existing_positions.get(parent_id) {
-            // Parent wasn't in the simulation (e.g. selected_only mode) — use existing position
-            let sat_pos = Position::new(
-                parent_pos.x + config.node_width + config.satellite_gap,
-                parent_pos.y + config.satellite_offset_y,
-            );
-            result.insert(*satellite_id, sat_pos);
         }
     }
 
     result
+}
+
+/// Places a single new node near its connections in an existing layout.
+///
+/// Strategy:
+/// 1. Find connected nodes that are already positioned
+/// 2. If connected: place downstream (right) of upstream nodes or upstream (left) of downstream
+/// 3. If not connected: use media class to pick column, center vertically
+/// 4. Find non-overlapping spot
+pub fn place_new_node(
+    node_id: NodeId,
+    media_class: Option<&MediaClass>,
+    graph: &GraphState,
+    current_positions: &HashMap<NodeId, Position>,
+    viewport_center: Position,
+    config: &LayoutConfig,
+) -> Position {
+    // Find upstream and downstream connections
+    let mut upstream_positions: Vec<Position> = Vec::new();
+    let mut downstream_positions: Vec<Position> = Vec::new();
+
+    for link in graph.links.values() {
+        if link.input_node == node_id {
+            // This node receives from output_node — output_node is upstream
+            if let Some(&pos) = current_positions.get(&link.output_node) {
+                upstream_positions.push(pos);
+            }
+        } else if link.output_node == node_id {
+            // This node sends to input_node — input_node is downstream
+            if let Some(&pos) = current_positions.get(&link.input_node) {
+                downstream_positions.push(pos);
+            }
+        }
+    }
+
+    let has_connections = !upstream_positions.is_empty() || !downstream_positions.is_empty();
+
+    let base_position = if has_connections {
+        // Place based on connection topology
+        let all_connected: Vec<Position> = upstream_positions
+            .iter()
+            .chain(downstream_positions.iter())
+            .copied()
+            .collect();
+
+        let avg_y = all_connected.iter().map(|p| p.y).sum::<f32>() / all_connected.len() as f32;
+
+        let x = if !upstream_positions.is_empty() {
+            // Place to the right of upstream nodes
+            let max_upstream_x = upstream_positions
+                .iter()
+                .map(|p| p.x)
+                .fold(f32::NEG_INFINITY, f32::max);
+            max_upstream_x + config.horizontal_spacing
+        } else {
+            // Place to the left of downstream nodes
+            let min_downstream_x = downstream_positions
+                .iter()
+                .map(|p| p.x)
+                .fold(f32::INFINITY, f32::min);
+            min_downstream_x - config.horizontal_spacing
+        };
+
+        Position::new(x, avg_y)
+    } else {
+        // No connections — use media class for column placement
+        let column = media_class.map(|mc| mc.layout_column()).unwrap_or(0);
+
+        // Find the X range of existing nodes to place in appropriate column
+        let (min_x, max_x) = if current_positions.is_empty() {
+            (0.0, 0.0)
+        } else {
+            let xs: Vec<f32> = current_positions.values().map(|p| p.x).collect();
+            (
+                xs.iter().copied().fold(f32::INFINITY, f32::min),
+                xs.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+            )
+        };
+
+        let x = match column {
+            -1 => min_x - config.horizontal_spacing / 2.0,
+            1 => max_x + config.horizontal_spacing / 2.0,
+            _ => viewport_center.x,
+        };
+
+        Position::new(x, viewport_center.y)
+    };
+
+    // Find non-overlapping spot
+    find_free_spot(base_position, current_positions, config)
+}
+
+/// Finds a non-overlapping position near the target.
+fn find_free_spot(
+    target: Position,
+    current_positions: &HashMap<NodeId, Position>,
+    config: &LayoutConfig,
+) -> Position {
+    let min_distance = (config.node_width.powi(2) + config.node_height.powi(2)).sqrt() * 0.6;
+
+    let grid = crate::util::spatial::SpatialGrid::from_positions(
+        min_distance,
+        current_positions.values().copied(),
+    );
+
+    if !grid.has_neighbor_within(target, min_distance) {
+        return target;
+    }
+
+    // Try positions in expanding vertical offsets (most natural for column layout)
+    for radius in 1..30 {
+        let offset = radius as f32 * config.vertical_spacing;
+
+        let below = Position::new(target.x, target.y + offset);
+        if !grid.has_neighbor_within(below, min_distance) {
+            return below;
+        }
+
+        let above = Position::new(target.x, target.y - offset);
+        if !grid.has_neighbor_within(above, min_distance) {
+            return above;
+        }
+    }
+
+    // Fallback
+    Position::new(target.x, target.y + config.vertical_spacing)
 }
 
 #[cfg(test)]
@@ -488,14 +457,9 @@ mod tests {
     #[test]
     fn test_layout_config_default() {
         let config = LayoutConfig::default();
-        assert!(config.node_spacing_x > 0.0);
-        assert!(config.node_width > 0.0);
-    }
-
-    #[test]
-    fn test_smart_layout_new() {
-        let layout = SmartLayout::new();
-        assert_eq!(layout.config.node_spacing_x, 60.0);
+        assert_eq!(config.horizontal_spacing, 300.0);
+        assert_eq!(config.vertical_spacing, 100.0);
+        assert_eq!(config.node_width, 200.0);
     }
 
     #[test]
@@ -522,38 +486,159 @@ mod tests {
     }
 
     #[test]
-    fn test_satellite_config_defaults() {
+    fn test_layered_layout_empty() {
+        let result = layered_layout(&[], &[], &LayoutConfig::default());
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_layered_layout_single_node() {
+        let nodes = vec![(NodeId::new(1), None, "test".to_string())];
+        let result = layered_layout(&nodes, &[], &LayoutConfig::default());
+        assert_eq!(result.len(), 1);
+        // Single node should be centered at origin
+        let pos = result.get(&NodeId::new(1)).unwrap();
+        assert!((pos.x).abs() < 1.0);
+        assert!((pos.y).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_layered_layout_source_sink_ordering() {
+        let nodes = vec![
+            (
+                NodeId::new(1),
+                Some(MediaClass::AudioSource),
+                "source".to_string(),
+            ),
+            (
+                NodeId::new(2),
+                Some(MediaClass::AudioSink),
+                "sink".to_string(),
+            ),
+        ];
+        let links = vec![(NodeId::new(1), NodeId::new(2))];
+        let result = layered_layout(&nodes, &links, &LayoutConfig::default());
+
+        let source_pos = result.get(&NodeId::new(1)).unwrap();
+        let sink_pos = result.get(&NodeId::new(2)).unwrap();
+        // Source should be to the left of sink
+        assert!(source_pos.x < sink_pos.x);
+    }
+
+    #[test]
+    fn test_layered_layout_three_layer_chain() {
+        let nodes = vec![
+            (
+                NodeId::new(1),
+                Some(MediaClass::AudioSource),
+                "source".to_string(),
+            ),
+            (NodeId::new(2), None, "filter".to_string()),
+            (
+                NodeId::new(3),
+                Some(MediaClass::AudioSink),
+                "sink".to_string(),
+            ),
+        ];
+        let links = vec![
+            (NodeId::new(1), NodeId::new(2)),
+            (NodeId::new(2), NodeId::new(3)),
+        ];
+        let result = layered_layout(&nodes, &links, &LayoutConfig::default());
+
+        let p1 = result.get(&NodeId::new(1)).unwrap();
+        let p2 = result.get(&NodeId::new(2)).unwrap();
+        let p3 = result.get(&NodeId::new(3)).unwrap();
+
+        // Left to right ordering
+        assert!(p1.x < p2.x);
+        assert!(p2.x < p3.x);
+    }
+
+    #[test]
+    fn test_layered_layout_no_overlap() {
+        let nodes: Vec<_> = (0..10)
+            .map(|i| (NodeId::new(i), None, format!("node-{}", i)))
+            .collect();
+        let links: Vec<_> = (0..9)
+            .map(|i| (NodeId::new(i), NodeId::new(i + 1)))
+            .collect();
         let config = LayoutConfig::default();
-        assert!(config.satellite_gap > 0.0);
+        let result = layered_layout(&nodes, &links, &config);
+
+        let min_distance = (config.node_width.powi(2) + config.node_height.powi(2)).sqrt() * 0.5;
+
+        let positions: Vec<Position> = result.values().copied().collect();
+        for i in 0..positions.len() {
+            for j in (i + 1)..positions.len() {
+                let dist = positions[i].distance_to(&positions[j]);
+                assert!(
+                    dist >= min_distance,
+                    "Nodes overlap: distance {} < min {}",
+                    dist,
+                    min_distance
+                );
+            }
+        }
     }
 
     #[test]
-    fn test_is_position_free() {
-        let layout = SmartLayout::new();
-        let mut positions = HashMap::new();
-        positions.insert(NodeId::new(1), Position::new(0.0, 0.0));
+    fn test_layered_layout_satellites() {
+        let nodes = vec![
+            (
+                NodeId::new(1),
+                Some(MediaClass::AudioSource),
+                "source".to_string(),
+            ),
+            (NodeId::new(2), None, "pipeflow-meter-1".to_string()),
+        ];
+        let config = LayoutConfig::default();
+        let result = layered_layout(&nodes, &[], &config);
 
-        // Position far away should be free
-        assert!(layout.is_position_free(Position::new(500.0, 500.0), &positions));
+        assert_eq!(result.len(), 2);
+        let parent = result.get(&NodeId::new(1)).unwrap();
+        let satellite = result.get(&NodeId::new(2)).unwrap();
 
-        // Position on top of existing node should not be free
-        assert!(!layout.is_position_free(Position::new(0.0, 0.0), &positions));
-
-        // Position very close should not be free
-        assert!(!layout.is_position_free(Position::new(10.0, 10.0), &positions));
+        // Satellite should be to the right of parent
+        assert!(satellite.x > parent.x);
+        let expected_x = parent.x + config.node_width + config.satellite_gap;
+        assert!((satellite.x - expected_x).abs() < 1.0);
     }
 
     #[test]
-    fn test_calculate_new_node_position_no_connections() {
-        let layout = SmartLayout::new();
+    fn test_layered_layout_centered() {
+        let nodes: Vec<_> = (0..5)
+            .map(|i| (NodeId::new(i), None, format!("node-{}", i)))
+            .collect();
+        let links: Vec<_> = (0..4)
+            .map(|i| (NodeId::new(i), NodeId::new(i + 1)))
+            .collect();
+        let result = layered_layout(&nodes, &links, &LayoutConfig::default());
+
+        // Graph should be roughly centered around (0, 0)
+        let cx: f32 = result.values().map(|p| p.x).sum::<f32>() / result.len() as f32;
+        let cy: f32 = result.values().map(|p| p.y).sum::<f32>() / result.len() as f32;
+        assert!(cx.abs() < 1.0, "Center X {} not near 0", cx);
+        assert!(cy.abs() < 1.0, "Center Y {} not near 0", cy);
+    }
+
+    #[test]
+    fn test_place_new_node_no_connections() {
         let graph = GraphState::default();
         let positions = HashMap::new();
-        let viewport_center = Position::new(100.0, 100.0);
+        let viewport_center = Position::new(100.0, 200.0);
+        let config = LayoutConfig::default();
 
-        let pos =
-            layout.calculate_new_node_position(NodeId::new(1), &graph, &positions, viewport_center);
+        let pos = place_new_node(
+            NodeId::new(1),
+            None,
+            &graph,
+            &positions,
+            viewport_center,
+            &config,
+        );
 
-        // Should place near viewport center
+        // Should be near viewport center
         assert!((pos.x - viewport_center.x).abs() < 300.0);
         assert!((pos.y - viewport_center.y).abs() < 300.0);
     }

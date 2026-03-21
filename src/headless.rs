@@ -32,7 +32,7 @@ use crate::pipewire::meters::{MeterCollector, MeterConfig};
 #[cfg(feature = "network")]
 use crate::util::id::NodeIdentifier;
 #[cfg(feature = "network")]
-use crate::util::layout::SmartLayout;
+use crate::util::layout::{place_new_node, LayoutConfig};
 #[cfg(feature = "network")]
 use crate::util::spatial::Position;
 
@@ -205,12 +205,17 @@ fn process_event(state: &mut crate::core::state::AppState, event: &PwEvent) {
             // Restore position if saved, otherwise calculate using centralized layout
             if !state.ui.restore_position_for_node(info.id, &identifier) {
                 // No saved position, calculate a new one using smart layout
-                let layout = SmartLayout::new();
-                let position = layout.calculate_new_node_position(
+                let media_class = state
+                    .graph
+                    .get_node(&info.id)
+                    .and_then(|n| n.media_class.as_ref());
+                let position = place_new_node(
                     info.id,
+                    media_class,
                     &state.graph,
                     &state.ui.node_positions,
                     Position::zero(), // Center at origin for headless mode
+                    &LayoutConfig::default(),
                 );
                 state.ui.node_positions.insert(info.id, position);
                 state

@@ -8,9 +8,7 @@ use crate::core::state::GraphState;
 use crate::domain::graph::Node;
 use crate::domain::rules::{ConnectionSpec, MatchPattern};
 use crate::util::id::{NodeId, NodeIdentifier};
-use crate::util::layout::{
-    force_directed_layout, get_metering_target_id, is_metering_node, LayoutConfig,
-};
+use crate::util::layout::{get_metering_target_id, is_metering_node, layered_layout, LayoutConfig};
 use crate::util::spatial::Position;
 
 use super::types::CenterViewMode;
@@ -491,11 +489,10 @@ impl PipeflowApp {
             .values()
             .map(|l| (l.output_node, l.input_node))
             .collect();
-        let positions = state.ui.node_positions.clone();
         let config = LayoutConfig::default();
         drop(state);
 
-        let new_positions = force_directed_layout(&nodes, &links, &positions, &config);
+        let new_positions = layered_layout(&nodes, &links, &config);
         let new_positions_vec: Vec<(NodeId, Position)> =
             new_positions.iter().map(|(id, pos)| (*id, *pos)).collect();
 

@@ -91,6 +91,7 @@ impl eframe::App for PipeflowApp {
 
         // --- Event Processing ---
         self.process_pw_events();
+        self.process_deferred_placements();
         self.process_pending_rule_connections();
         self.update_animations(ctx);
         self.handle_startup_initialization();
